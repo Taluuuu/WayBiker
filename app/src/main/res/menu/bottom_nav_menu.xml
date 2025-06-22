@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <item
+        android:title="Home"
+        android:icon="@drawable/baseline_map_24"
+        android:id="@+id/map"/>
+    <item
+        android:title="Tracks"
+        android:icon="@drawable/outline_pedal_bike_24"
+        android:id="@+id/tracks"/>
+    <item
+        android:title="Profile"
+        android:icon="@drawable/outline_person_24"
+        android:id="@+id/profile"/>
+</menu>
