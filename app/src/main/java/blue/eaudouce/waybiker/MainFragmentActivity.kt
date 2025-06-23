@@ -2,12 +2,12 @@ package blue.eaudouce.waybiker
 
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentContainerView
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
-import com.mapbox.maps.SourceQueryOptions
-import com.mapbox.maps.Style
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
@@ -17,22 +17,48 @@ import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okio.IOException
 import org.json.JSONObject
 import java.net.URLEncoder
 
-class MainActivity : ComponentActivity() {
+class MainFragmentActivity : FragmentActivity() {
+    private val homeFragment = HomeFragment()
+    private val tracksFragment = TracksFragment()
+    private val profileFragment = ProfileFragment()
+
     private lateinit var mapView: MapView
     private lateinit var annotationMgr: PolylineAnnotationManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        setContentView(R.layout.map_screen)
-        mapView = findViewById<MapView>(R.id.map_view)
+        setContentView(R.layout.fragment_activity_main)
+
+        // Setup tabs
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.fl_selected_activity, homeFragment)
+            .commit()
+
+        val bottomNav = findViewById<BottomNavigationView>(R.id.bnv_navbar)
+        bottomNav.setOnItemSelectedListener { item ->
+            val fragment = when (item.itemId) {
+                R.id.menu_home -> homeFragment
+                R.id.menu_tracks -> tracksFragment
+                R.id.menu_profile -> profileFragment
+                else -> null
+            }
+
+            fragment?.let {
+                supportFragmentManager.beginTransaction()
+                    .replace(R.id.fl_selected_activity, it)
+                    .commit()
+                true
+            } ?: false
+        }
+
+        mapView = findViewById(R.id.mv_main_map)
         mapView.mapboxMap.setCamera(
             CameraOptions.Builder()
                 .center(Point.fromLngLat(-73.5824535409464, 45.49576954424193))
