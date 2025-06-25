@@ -5,13 +5,20 @@ import android.util.Log
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
+import com.mapbox.maps.MapboxMap
+import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import com.mapbox.maps.plugin.gestures.OnMoveListener
+import com.mapbox.maps.plugin.gestures.addOnMapClickListener
+import com.mapbox.maps.plugin.gestures.addOnMoveListener
+import com.mapbox.maps.toCameraOptions
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -71,18 +78,36 @@ class MainFragmentActivity : FragmentActivity() {
         annotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
         fetchStreetGeometry()
+
+        mapView.mapboxMap.addOnMoveListener(object : OnMoveListener {
+            override fun onMove(detector: MoveGestureDetector): Boolean {
+                return false
+            }
+
+            override fun onMoveBegin(detector: MoveGestureDetector) {
+            }
+
+            override fun onMoveEnd(detector: MoveGestureDetector) {
+                fetchStreetGeometry()
+            }
+        })
     }
 
     fun fetchStreetGeometry() {
-        val query = """
-            [out:json][timeout:25];
+
+        annotationMgr.deleteAll()
+
+        val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
+
+        val query = String.format("""
+            [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
             (
-              way["name"="Rue Saint-Mathieu"]["lanes"]["highway"](around:1000,45.495,-73.578);
+              way["lanes"]["highway"];
             );
             out body;
             >;
             out skel qt;
-        """.trimIndent()
+        """, bounds.south(), bounds.west(), bounds.north(), bounds.east()).trimIndent()
 
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val requestBody = "data=$encodedQuery"
@@ -104,24 +129,51 @@ class MainFragmentActivity : FragmentActivity() {
                 val json = JSONObject(body)
                 val elements = json.getJSONArray("elements")
 
-                val points = ArrayList<Point>()
+                // Find node positions
+                val nodePositions = HashMap<Long, Point>()
                 for (i in 0 until elements.length()) {
                     val element = elements.getJSONObject(i)
                     try {
-                        val lat = element.getDouble("lat")
-                        val lon = element.getDouble("lon")
-                        points.add(Point.fromLngLat(lon, lat))
+                        val elementType = element.getString("type")
+                        if (elementType.equals("node")) {
+                            val id = element.getLong("id")
+                            val lat = element.getDouble("lat")
+                            val lon = element.getDouble("lon")
+                            nodePositions[id] = Point.fromLngLat(lon, lat)
+                        }
                     }
-                    catch (e: Exception) { }
+                    catch (_: Exception) { }
                 }
 
-                points.sortBy { point -> point.latitude() }
+                for (i in 0 until elements.length()) {
+                    val element = elements.getJSONObject(i)
+                    try {
+                        val elementType = element.getString("type")
+                        if (elementType.equals("way")) {
+                            val points = ArrayList<Point>()
 
-                val annotationOptions = PolylineAnnotationOptions()
-                    .withPoints(points)
-                    .withLineColor("#ee4e8b")
-                    .withLineWidth(5.0)
-                annotationMgr.create(annotationOptions)
+                            val nodes = element.getJSONArray("nodes")
+                            for (j in 0 until nodes.length()) {
+                                val nodeId = nodes.getLong(j)
+                                val node = nodePositions[nodeId]
+                                if (node != null) {
+                                    points.add(node)
+                                }
+                            }
+
+                            val annotationOptions = PolylineAnnotationOptions()
+                                .withPoints(points)
+                                .withLineColor("#ee4e8b")
+                                .withLineWidth(10.0)
+                            annotationMgr.create(annotationOptions)
+                            annotationMgr.addClickListener { annotation ->
+                                annotationMgr.delete(annotation)
+                                false
+                            }
+                        }
+                    }
+                    catch (_: Exception) { }
+                }
             }
         })
     }
