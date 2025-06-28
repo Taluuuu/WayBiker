@@ -6,8 +6,14 @@ import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
 import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.addOnMoveListener
@@ -27,6 +33,11 @@ class WaybikerMap(mapView: MapView) {
 
     private val mapView = mapView
     private val annotationMgr: PolylineAnnotationManager
+    private val pointAnnotationMgr: CircleAnnotationManager
+
+    // Map of street portions' extremity nodes to their corresponding street portion.
+    // There will typically be two keys to a single street portion since it has two extremities.
+    private val streetPortions = HashMap<Long, StreetPortion>()
 
     init {
         mapView.mapboxMap.setCamera(
@@ -39,6 +50,7 @@ class WaybikerMap(mapView: MapView) {
         )
 
         annotationMgr = mapView.annotations.createPolylineAnnotationManager()
+        pointAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
 
         mapView.mapboxMap.addOnMoveListener(object : OnMoveListener {
             override fun onMove(detector: MoveGestureDetector): Boolean {
@@ -55,8 +67,6 @@ class WaybikerMap(mapView: MapView) {
     }
 
     private fun updateStreetGeometry() {
-        annotationMgr.deleteAll()
-
         val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
 
         val query = String.format("""
@@ -85,6 +95,9 @@ class WaybikerMap(mapView: MapView) {
             }
 
             override fun onResponse(call: Call, response: Response) {
+                annotationMgr.deleteAll()
+                pointAnnotationMgr.deleteAll()
+
                 val body = response.body?.string() ?: return
                 val json = JSONObject(body)
                 val elements = json.getJSONArray("elements")
@@ -111,6 +124,7 @@ class WaybikerMap(mapView: MapView) {
                         val elementType = element.getString("type")
                         if (elementType.equals("way")) {
                             val points = ArrayList<Point>()
+                            val nodeIds = ArrayList<Long>()
 
                             val nodes = element.getJSONArray("nodes")
                             for (j in 0 until nodes.length()) {
@@ -129,6 +143,14 @@ class WaybikerMap(mapView: MapView) {
                             annotationMgr.addClickListener { annotation ->
                                 annotationMgr.delete(annotation)
                                 false
+                            }
+
+                            for (j in 0 until points.size) {
+                                val pointAnnotationOptions = CircleAnnotationOptions()
+                                    .withPoint(points[j])
+                                    .withCircleRadius(5.0)
+                                    .withCircleColor("#4eee8b")
+                                pointAnnotationMgr.create(pointAnnotationOptions)
                             }
                         }
                     }
