@@ -1,4 +1,4 @@
-package blue.eaudouce.waybiker
+package blue.eaudouce.waybiker.map
 
 import com.mapbox.geojson.Point
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
