@@ -117,6 +117,8 @@ class WaybikerMap(mapView: MapView) {
             catch (_: Exception) { }
         }
 
+        // Combine all consecutive nodes of a street into a single list (or multiple lists
+        // in case of a divergence)
         val fullStreetNodes = HashMap<String, ArrayList<ArrayList<Long>>>()
         for ((streetName, nodes) in streetNodes)
         {
@@ -161,6 +163,7 @@ class WaybikerMap(mapView: MapView) {
             }
         }
 
+        // TODO: Create graph
         for ((_, street) in fullStreetNodes)
         {
             for (nodes in street) {
@@ -205,7 +208,7 @@ class WaybikerMap(mapView: MapView) {
         val query = String.format("""
             [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
             (
-              way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential)"];
+              way["highway"~"^(trunk|primary|secondary|tertiary|unclassified|residential)"];
             );
             out body;
             >;
