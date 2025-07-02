@@ -1,5 +1,6 @@
 package blue.eaudouce.waybiker.map
 
+import android.annotation.SuppressLint
 import android.util.Log
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.geojson.Point
@@ -27,22 +28,25 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
 
-class WaybikerMap(mapView: MapView) {
+class WaybikerMap(
+    val mapView: MapView
+) {
 
-    private val mapView = mapView
+    // TEMP: Draw debug stuff
     private val annotationMgr: PolylineAnnotationManager
     private val pointAnnotationMgr: CircleAnnotationManager
 
-    // Map of street portions' extremity nodes to their corresponding street portion.
-    // There will typically be two keys to a single street portion since it has two extremities.
-    private val streetPortions = HashMap<Long, StreetPortion>()
+    // Map graph data
+    val graphLinks = ArrayList<StreetBit>()
+    val graphNodes = HashMap<Long, Intersection>()
+    val nodePositions = HashMap<Long, Point>()
 
     init {
         mapView.mapboxMap.setCamera(
             CameraOptions.Builder()
                 .center(Point.fromLngLat(-73.5824535409464, 45.49576954424193))
                 .pitch(0.0)
-                .zoom(15.0)
+                .zoom(16.0)
                 .bearing(0.0)
                 .build()
         )
@@ -59,14 +63,18 @@ class WaybikerMap(mapView: MapView) {
             }
 
             override fun onMoveEnd(detector: MoveGestureDetector) {
-                updateStreetGeometry()
+                refreshMap()
             }
         })
     }
 
-    private fun getNodePositions(elements: JSONArray): HashMap<Long, Point> {
+    fun getNodePosition(nodeId: Long): Point {
+        return nodePositions[nodeId]?: Point.fromLngLat(0.0, 0.0)
+    }
 
-        val nodePositions = HashMap<Long, Point>()
+    private fun updateNodePositions(elements: JSONArray) {
+
+        nodePositions.clear()
         for (i in 0 until elements.length()) {
             val element = elements.getJSONObject(i)
             try {
@@ -81,19 +89,17 @@ class WaybikerMap(mapView: MapView) {
             }
             catch (_: Exception) { }
         }
-
-        return nodePositions
     }
 
-    private fun makeMapGraph(elements: JSONArray) {
-        val nodePositions = getNodePositions(elements)
+    data class FullStreetData(
+        val name: String,
+        val points: ArrayList<Long>
+    )
 
-        // Each node is associated with the list of streets passing through.
-        // If a node has one street, it is not an intersection. If it has more
-        // than one, it is an intersection linking all the street names.
-        val nodeUsers = HashMap<Long, HashSet<String>>()
-
-        val streetNodes = HashMap<String, ArrayList<ArrayList<Long>>>()
+    private fun getFullStreetNodesByName(elements: JSONArray): ArrayList<FullStreetData>
+    {
+        // Array of all ways corresponding to a street name
+        val streetBitsByName = HashMap<String, ArrayList<ArrayList<Long>>>()
         for (i in 0 until elements.length()) {
             val element = elements.getJSONObject(i)
             try {
@@ -108,19 +114,16 @@ class WaybikerMap(mapView: MapView) {
                 val wayNodeIds = ArrayList<Long>()
                 for (j in 0 until nodes.length()) {
                     val nodeId = nodes.getLong(j)
-                    nodeUsers.getOrPut(nodeId) { HashSet() }.add(streetName)
                     wayNodeIds.add(nodeId)
                 }
 
-                streetNodes.getOrPut(streetName) { ArrayList() }.add(wayNodeIds)
+                streetBitsByName.getOrPut(streetName) { ArrayList() }.add(wayNodeIds)
             }
             catch (_: Exception) { }
         }
 
-        // Combine all consecutive nodes of a street into a single list (or multiple lists
-        // in case of a divergence)
-        val fullStreetNodes = HashMap<String, ArrayList<ArrayList<Long>>>()
-        for ((streetName, nodes) in streetNodes)
+        val result = ArrayList<FullStreetData>()
+        for ((streetName, nodes) in streetBitsByName)
         {
             while (nodes.isNotEmpty())
             {
@@ -128,7 +131,9 @@ class WaybikerMap(mapView: MapView) {
                 val s1 = nodesToPlace.first()
                 val e1 = nodesToPlace.last()
 
-                var hasMoved = false
+                var foundAnyConsecutiveNodes = false
+
+                // Compare end of nodesToPlace to start of other ways
                 for (i in 1 until nodes.size)
                 {
                     val nodesToCompare = nodes[i]
@@ -137,11 +142,12 @@ class WaybikerMap(mapView: MapView) {
                     {
                         nodesToPlace.addAll(nodesToCompare.subList(1, nodesToCompare.size))
                         nodes.removeAt(i)
-                        hasMoved = true
+                        foundAnyConsecutiveNodes = true
                         break
                     }
                 }
 
+                // Compare start of nodesToPlace to end of other ways
                 for (i in 1 until nodes.size)
                 {
                     val nodesToCompare = nodes[i]
@@ -150,59 +156,118 @@ class WaybikerMap(mapView: MapView) {
                     {
                         nodesToPlace.addAll(0, nodesToCompare.subList(0, nodesToCompare.size - 1))
                         nodes.removeAt(i)
-                        hasMoved = true
+                        foundAnyConsecutiveNodes = true
                         break
                     }
                 }
 
-                if (!hasMoved)
+                if (!foundAnyConsecutiveNodes)
                 {
-                    fullStreetNodes.getOrPut(streetName) { ArrayList() }.add(nodesToPlace)
+                    result.add(FullStreetData(streetName, nodesToPlace))
                     nodes.removeAt(0)
                 }
             }
         }
 
-        // TODO: Create graph
-        for ((_, street) in fullStreetNodes)
-        {
-            for (nodes in street) {
-                val polyLinePoints = ArrayList<Point>()
-                for (nodeId in nodes) {
-                    val nodePos = nodePositions[nodeId]
-                    if (nodePos != null)
-                        polyLinePoints.add(nodePos)
-                }
+        return result
+    }
 
-                val annotationOptions = PolylineAnnotationOptions()
-                    .withPoints(polyLinePoints)
-                    .withLineColor("#ee4e8b")
-                    .withLineWidth(10.0)
-                annotationMgr.create(annotationOptions)
-                annotationMgr.addClickListener { annotation ->
-                    annotationMgr.delete(annotation)
-                    false
-                }
+    private fun findIntersectionNodes(streetData: ArrayList<FullStreetData>): HashSet<Long> {
+        // Each node is associated with the list of streets passing through.
+        // If a node has one street, it is not an intersection. If it has more
+        // than one, it is an intersection linking all the street names.
+        val nodeUsers = HashMap<Long, HashSet<String>>()
 
-                for (nodeId in nodes) {
-                    if (nodeUsers.getOrElse(nodeId) { HashSet() }.size > 1) {
-                        val nodePos = nodePositions[nodeId]
-                        if (nodePos != null) {
-                            // This node is an intersection
-                            val pointAnnotationOptions = CircleAnnotationOptions()
-                                .withPoint(nodePos)
-                                .withCircleRadius(5.0)
-                                .withCircleColor("#4eee8b")
-
-                            pointAnnotationMgr.create(pointAnnotationOptions)
-                        }
-                    }
-                }
+        for ((streetName, nodes) in streetData) {
+            for (nodeId in nodes) {
+                nodeUsers.getOrPut(nodeId) { HashSet() }.add(streetName)
             }
+        }
+
+        val result = HashSet<Long>()
+        for ((nodeId, passingStreets) in nodeUsers) {
+            if (passingStreets.size > 1) {
+                result.add(nodeId)
+            }
+        }
+
+        return result
+    }
+
+    private fun makeMapGraph(elements: JSONArray) {
+        updateNodePositions(elements)
+        val fullStreetNodes = getFullStreetNodesByName(elements)
+        val intersectionNodes = findIntersectionNodes(fullStreetNodes)
+
+        // Add intersections to the graph
+        graphNodes.clear()
+        for (nodeId in intersectionNodes) {
+            graphNodes[nodeId] = Intersection(nodeId)
+        }
+
+        // Create links between nodes
+        graphLinks.clear()
+        for ((_, nodeIds) in fullStreetNodes) {
+            var prevIntersectionId: Long? = null
+            val segmentNodeIds = ArrayList<Long>()
+            for (nodeId in nodeIds) {
+                if (intersectionNodes.contains(nodeId)) {
+                    // nodeId is an intersection.
+                    if (prevIntersectionId != null) {
+                        segmentNodeIds.add(nodeId)
+
+                        // Add this link to both nodes...
+                        val linkStart = graphNodes[prevIntersectionId]
+                        val linkEnd = graphNodes[nodeId]
+                        val streetBit = StreetBit(segmentNodeIds.toList())
+                        linkStart?.connectingStreets?.add(streetBit)
+                        linkEnd?.connectingStreets?.add(streetBit)
+
+                        graphLinks.add(streetBit)
+
+                        segmentNodeIds.clear()
+                    }
+
+                    prevIntersectionId = nodeId
+                }
+
+                if (prevIntersectionId != null)
+                    segmentNodeIds.add(nodeId)
+            }
+        }
+
+        // Draw streets
+        for (streetBit in graphLinks)
+        {
+            val polyLinePoints = ArrayList<Point>()
+            for (nodeId in streetBit.nodeIds) {
+                polyLinePoints.add(getNodePosition(nodeId))
+            }
+
+            val annotationOptions = PolylineAnnotationOptions()
+                .withPoints(polyLinePoints)
+                .withLineColor("#ee4e8b")
+                .withLineWidth(10.0)
+            annotationMgr.create(annotationOptions)
+            annotationMgr.addClickListener { annotation ->
+                annotationMgr.delete(annotation)
+                false
+            }
+        }
+
+        // Draw intersections
+        for (nodeId in intersectionNodes) {
+            val pointAnnotationOptions = CircleAnnotationOptions()
+                .withPoint(getNodePosition(nodeId))
+                .withCircleRadius(5.0)
+                .withCircleColor("#4eee8b")
+
+            pointAnnotationMgr.create(pointAnnotationOptions)
         }
     }
 
-    private fun updateStreetGeometry() {
+    @SuppressLint("DefaultLocale")
+    private fun refreshMap() {
         val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
 
         val query = String.format("""
@@ -213,7 +278,7 @@ class WaybikerMap(mapView: MapView) {
             out body;
             >;
             out skel qt;
-        """, bounds.south(), bounds.west(), bounds.north(), bounds.east()).trimIndent()
+        """, bounds.south() - 0.002f, bounds.west() - 0.002f, bounds.north() + 0.002f, bounds.east() + 0.002f).trimIndent()
 
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val requestBody = "data=$encodedQuery"

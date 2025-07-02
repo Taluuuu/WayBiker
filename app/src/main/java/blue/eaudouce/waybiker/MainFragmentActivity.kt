@@ -12,7 +12,6 @@ class MainFragmentActivity : FragmentActivity() {
 
     private lateinit var waybikerMap: WaybikerMap
 
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
