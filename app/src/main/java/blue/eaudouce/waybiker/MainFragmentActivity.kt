@@ -6,9 +6,9 @@ import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
 class MainFragmentActivity : FragmentActivity() {
-    private val homeFragment = HomeFragment()
-    private val tracksFragment = TracksFragment()
-    private val profileFragment = ProfileFragment()
+    private var homeFragment: HomeFragment? = null
+    private var tracksFragment: TracksFragment? = null
+    private var profileFragment: ProfileFragment? = null
 
     private lateinit var waybikerMap: WaybikerMap
 
@@ -16,11 +16,6 @@ class MainFragmentActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.fragment_activity_main)
-
-        // Setup tabs
-        supportFragmentManager.beginTransaction()
-            .replace(R.id.fl_selected_activity, homeFragment)
-            .commit()
 
         val bottomNav = findViewById<BottomNavigationView>(R.id.bnv_navbar)
         bottomNav.setOnItemSelectedListener { item ->
@@ -40,5 +35,15 @@ class MainFragmentActivity : FragmentActivity() {
         }
 
         waybikerMap = WaybikerMap(findViewById(R.id.mv_main_map))
+
+        homeFragment = HomeFragment(waybikerMap)
+        tracksFragment = TracksFragment()
+        profileFragment = ProfileFragment()
+
+        homeFragment?.let {
+            supportFragmentManager.beginTransaction()
+                .replace(R.id.fl_selected_activity, it)
+                .commit()
+        }
     }
 }

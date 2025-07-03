@@ -2,13 +2,20 @@ package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
 import android.util.Log
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
+import com.mapbox.maps.plugin.annotation.Annotation
 import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotation
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.OnCircleAnnotationDragListener
+import com.mapbox.maps.plugin.annotation.generated.OnPolylineAnnotationClickListener
+import com.mapbox.maps.plugin.annotation.generated.OnPolylineAnnotationDragListener
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
@@ -27,6 +34,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import kotlin.math.cos
+import kotlin.math.sqrt
 
 class WaybikerMap(
     val mapView: MapView
@@ -40,6 +49,8 @@ class WaybikerMap(
     val graphLinks = ArrayList<StreetBit>()
     val graphNodes = HashMap<Long, Intersection>()
     val nodePositions = HashMap<Long, Point>()
+
+    var onClickedStreet: ((StreetBit) -> (Unit))? = null
 
     init {
         mapView.mapboxMap.setCamera(
@@ -194,6 +205,33 @@ class WaybikerMap(
         return result
     }
 
+    private fun calcPointDistanceSqr(p1: Point, p2: Point): Double {
+        // From ChatGPT
+        val w1 = Math.toRadians(p1.latitude())
+        val w2 = Math.toRadians(p2.latitude())
+        val dw = w2 - w1
+        val dl = Math.toRadians(p2.longitude() - p1.longitude())
+        val R = 6371000.0  // Earth's radius in meters
+        val x = dl * cos((w1 + w2) / 2)
+        val y = dw
+        return sqrt(x * x + y * y) * R
+    }
+
+    private fun findNearestIntersectionToPoint(point: Point): Long {
+        var minDistance = Double.MAX_VALUE
+        var nearestNodeId = 0L
+        for ((nodeId, _) in graphNodes) {
+            val nodePoint = getNodePosition(nodeId)
+            val distance = calcPointDistanceSqr(point, nodePoint)
+            if (distance < minDistance) {
+                minDistance = distance
+                nearestNodeId = nodeId
+            }
+        }
+
+        return nearestNodeId
+    }
+
     private fun makeMapGraph(elements: JSONArray) {
         updateNodePositions(elements)
         val fullStreetNodes = getFullStreetNodesByName(elements)
@@ -244,26 +282,60 @@ class WaybikerMap(
                 polyLinePoints.add(getNodePosition(nodeId))
             }
 
+            val bitEnds = streetBit.getEnds()
+            val jsonElement = JsonObject()
+            jsonElement.addProperty("p0", bitEnds.first)
+            jsonElement.addProperty("p1", bitEnds.second)
+
             val annotationOptions = PolylineAnnotationOptions()
                 .withPoints(polyLinePoints)
-                .withLineColor("#ee4e8b")
-                .withLineWidth(10.0)
+                .withLineColor("#9c9c9c")
+                .withLineWidth(8.0)
+                .withData(jsonElement)
+//                .withDraggable(true)
             annotationMgr.create(annotationOptions)
-            annotationMgr.addClickListener { annotation ->
-                annotationMgr.delete(annotation)
-                false
+        }
+
+        annotationMgr.addClickListener { annotation ->
+            annotation.getData() as JsonObject
+            val data = annotation.getData() as JsonObject
+            val p0 = data.get("p0").asLong
+            val p1 = data.get("p1").asLong
+            val streetBit = graphLinks.find { streetBit ->
+                val ends = streetBit.getEnds()
+                ends.first == p0 && ends.second == p1
             }
+
+            if (streetBit != null)
+                onClickedStreet?.invoke(streetBit)
+
+            false
         }
 
         // Draw intersections
         for (nodeId in intersectionNodes) {
             val pointAnnotationOptions = CircleAnnotationOptions()
                 .withPoint(getNodePosition(nodeId))
-                .withCircleRadius(5.0)
+                .withCircleRadius(20.0)
                 .withCircleColor("#4eee8b")
+                .withDraggable(true)
 
             pointAnnotationMgr.create(pointAnnotationOptions)
+            break
         }
+
+        pointAnnotationMgr.addDragListener(object : OnCircleAnnotationDragListener {
+            override fun onAnnotationDragStarted(annotation: Annotation<*>) {}
+
+            override fun onAnnotationDrag(annotation: Annotation<*>) {
+                val circleAnnotation = annotation as CircleAnnotation
+                val nearestNodeId = findNearestIntersectionToPoint(circleAnnotation.point)
+                circleAnnotation.point = getNodePosition(nearestNodeId)
+                pointAnnotationMgr.update(annotation)
+            }
+
+            override fun onAnnotationDragFinished(annotation: Annotation<*>) {}
+        })
     }
 
     @SuppressLint("DefaultLocale")
