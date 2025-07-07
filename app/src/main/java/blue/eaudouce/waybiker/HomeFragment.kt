@@ -18,23 +18,14 @@ class HomeFragment(
     private val waybikerMap: WaybikerMap
 ) : Fragment(R.layout.fragment_home) {
 
+    private val mapAction = MapAction_RateStreet(waybikerMap)
+
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
         val rateStreetButton = view.findViewById<FloatingActionButton>(R.id.fab_rate_street)
         rateStreetButton.setOnClickListener {
-            waybikerMap.onClickedStreet = { clickedStreet: StreetBit ->
-                val nodePositions = clickedStreet.nodeIds.mapNotNull {
-                    nodeId -> waybikerMap.nodePositions[nodeId]
-                }
-
-                val annotationMgr = waybikerMap.mapView.annotations.createPolylineAnnotationManager()
-                val annotationOptions = PolylineAnnotationOptions()
-                    .withPoints(nodePositions)
-                    .withLineWidth(20.0)
-                    .withLineColor("#439c32")
-                annotationMgr.create(annotationOptions)
-            }
+            mapAction.start()
         }
     }
 }

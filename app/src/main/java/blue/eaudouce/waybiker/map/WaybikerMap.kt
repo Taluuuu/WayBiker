@@ -43,7 +43,6 @@ class WaybikerMap(
 
     // TEMP: Draw debug stuff
     private val annotationMgr: PolylineAnnotationManager
-    private val pointAnnotationMgr: CircleAnnotationManager
 
     // Map graph data
     val graphLinks = ArrayList<StreetBit>()
@@ -63,7 +62,6 @@ class WaybikerMap(
         )
 
         annotationMgr = mapView.annotations.createPolylineAnnotationManager()
-        pointAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
 
         mapView.mapboxMap.addOnMoveListener(object : OnMoveListener {
             override fun onMove(detector: MoveGestureDetector): Boolean {
@@ -77,6 +75,17 @@ class WaybikerMap(
                 refreshMap()
             }
         })
+    }
+
+    fun getConnectedIntersections(nodeId: Long): ArrayList<Long> {
+        val result = ArrayList<Long>()
+        for (link in graphLinks) {
+            if (link.connectsIntersection(nodeId)) {
+                result.add(link.getOtherEnd(nodeId))
+            }
+        }
+
+        return result
     }
 
     fun getNodePosition(nodeId: Long): Point {
@@ -217,10 +226,17 @@ class WaybikerMap(
         return sqrt(x * x + y * y) * R
     }
 
-    private fun findNearestIntersectionToPoint(point: Point): Long {
+    fun findLinkBetween(intersection0: Long, intersection1: Long): StreetBit? {
+        return graphLinks.find { streetBit ->
+            streetBit.connectsIntersection(intersection0) &&
+            streetBit.connectsIntersection(intersection1)
+        }
+    }
+
+    fun findNearestIntersectionToPoint(point: Point, intersections: List<Long>): Long {
         var minDistance = Double.MAX_VALUE
         var nearestNodeId = 0L
-        for ((nodeId, _) in graphNodes) {
+        for (nodeId in intersections) {
             val nodePoint = getNodePosition(nodeId)
             val distance = calcPointDistanceSqr(point, nodePoint)
             if (distance < minDistance) {
@@ -230,6 +246,10 @@ class WaybikerMap(
         }
 
         return nearestNodeId
+    }
+
+    fun findNearestIntersectionToPoint(point: Point): Long {
+        return findNearestIntersectionToPoint(point, graphNodes.map { v -> v.key })
     }
 
     private fun makeMapGraph(elements: JSONArray) {
@@ -292,12 +312,10 @@ class WaybikerMap(
                 .withLineColor("#9c9c9c")
                 .withLineWidth(8.0)
                 .withData(jsonElement)
-//                .withDraggable(true)
             annotationMgr.create(annotationOptions)
         }
 
         annotationMgr.addClickListener { annotation ->
-            annotation.getData() as JsonObject
             val data = annotation.getData() as JsonObject
             val p0 = data.get("p0").asLong
             val p1 = data.get("p1").asLong
@@ -311,31 +329,6 @@ class WaybikerMap(
 
             false
         }
-
-        // Draw intersections
-        for (nodeId in intersectionNodes) {
-            val pointAnnotationOptions = CircleAnnotationOptions()
-                .withPoint(getNodePosition(nodeId))
-                .withCircleRadius(20.0)
-                .withCircleColor("#4eee8b")
-                .withDraggable(true)
-
-            pointAnnotationMgr.create(pointAnnotationOptions)
-            break
-        }
-
-        pointAnnotationMgr.addDragListener(object : OnCircleAnnotationDragListener {
-            override fun onAnnotationDragStarted(annotation: Annotation<*>) {}
-
-            override fun onAnnotationDrag(annotation: Annotation<*>) {
-                val circleAnnotation = annotation as CircleAnnotation
-                val nearestNodeId = findNearestIntersectionToPoint(circleAnnotation.point)
-                circleAnnotation.point = getNodePosition(nearestNodeId)
-                pointAnnotationMgr.update(annotation)
-            }
-
-            override fun onAnnotationDragFinished(annotation: Annotation<*>) {}
-        })
     }
 
     @SuppressLint("DefaultLocale")
@@ -369,7 +362,6 @@ class WaybikerMap(
 
             override fun onResponse(call: Call, response: Response) {
                 annotationMgr.deleteAll()
-                pointAnnotationMgr.deleteAll()
 
                 val body = response.body?.string() ?: return
                 val json = JSONObject(body)
