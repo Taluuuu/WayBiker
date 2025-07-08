@@ -1,6 +1,7 @@
 package blue.eaudouce.waybiker
 
 import android.os.Bundle
+import android.widget.FrameLayout
 import androidx.fragment.app.FragmentActivity
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.bottomnavigation.BottomNavigationView

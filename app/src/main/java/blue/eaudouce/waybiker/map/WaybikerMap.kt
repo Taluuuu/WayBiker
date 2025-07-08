@@ -315,6 +315,7 @@ class WaybikerMap(
             annotationMgr.create(annotationOptions)
         }
 
+        // Allow clicking on streets
         annotationMgr.addClickListener { annotation ->
             val data = annotation.getData() as JsonObject
             val p0 = data.get("p0").asLong
