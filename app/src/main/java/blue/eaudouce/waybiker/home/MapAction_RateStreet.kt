@@ -1,11 +1,9 @@
-package blue.eaudouce.waybiker
+package blue.eaudouce.waybiker.home
 
 import android.content.Context
-import android.view.LayoutInflater
-import android.view.View
-import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.RatingBar
+import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.map.StreetBit
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.gson.JsonObject
@@ -31,7 +29,7 @@ class MapAction_RateStreet(
 
     private val selectedStreets = ArrayDeque<Long>()
     private val selectionAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
-    private var dialogView: View? = null
+    private var dialogView: MapDialogView? = null
 
     private enum class RatingState {
         Inactive,
@@ -72,7 +70,7 @@ class MapAction_RateStreet(
                 unhighlightAllStreets()
             }
             RatingState.TapStreet -> {
-                updateDialog(
+                dialogView?.updateDialog(
                     "Tap the street you want to rate",
                     "",
                     { finishAction() },
@@ -89,7 +87,7 @@ class MapAction_RateStreet(
                 }
             }
             RatingState.DefineStreetLength -> {
-                updateDialog(
+                dialogView?.updateDialog(
                     "Define the portion of the street to rate",
                     "",
                     { setState(RatingState.TapStreet) },
@@ -108,12 +106,16 @@ class MapAction_RateStreet(
                 })
             }
             RatingState.RateStreet -> {
-                updateDialog(
+                dialogView?.updateDialog(
                     "Rate your selection",
                     "",
                     { setState(RatingState.DefineStreetLength) },
-                    { finishAction() }
+                    {
+                        finishAction()
+                    }
                 )
+
+                dialogView?.setContent(StreetRatingBarView(tabContentView.context))
             }
         }
     }
@@ -235,36 +237,12 @@ class MapAction_RateStreet(
         }
     }
 
-    private fun updateDialog(title: String, subtitle: String, backCallback: (() -> Unit)?, nextCallback: (() -> Unit)?) {
-
-        val dialogTitle = dialogView?.findViewById<TextView>(R.id.tv_dialog_title)
-        dialogTitle?.text = title
-
-        val dialogSubtext = dialogView?.findViewById<TextView>(R.id.tv_dialog_subtext)
-        dialogSubtext?.text = subtitle
-
-        val backButton = dialogView?.findViewById<Button>(R.id.btn_back)
-        if (backCallback == null) {
-            backButton?.isEnabled = false
-        } else {
-            backButton?.isEnabled = true
-            backButton?.setOnClickListener { backCallback() }
-        }
-
-        val nextButton = dialogView?.findViewById<Button>(R.id.btn_next)
-        if (nextCallback == null) {
-            nextButton?.isEnabled = false
-        } else {
-            nextButton?.isEnabled = true
-            nextButton?.setOnClickListener { nextCallback() }
-        }
-    }
-
     override fun start(context: Context?) {
 
-        dialogView = LayoutInflater.from(context)
-            .inflate(R.layout.view_map_dialog, tabContentView)
-            .findViewById(R.id.cl_map_dialog)
+        if (context != null) {
+            dialogView = MapDialogView(context)
+            tabContentView.addView(dialogView)
+        }
 
         setState(RatingState.TapStreet)
     }

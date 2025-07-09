@@ -1,10 +1,11 @@
-package blue.eaudouce.waybiker
+package blue.eaudouce.waybiker.home
 
 import android.os.Bundle
 import androidx.fragment.app.Fragment
 import android.view.View
 import android.view.View.INVISIBLE
 import android.view.View.VISIBLE
+import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 

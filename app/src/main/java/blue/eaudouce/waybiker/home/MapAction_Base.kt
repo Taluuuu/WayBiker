@@ -1,4 +1,4 @@
-package blue.eaudouce.waybiker
+package blue.eaudouce.waybiker.home
 
 import android.content.Context
 

@@ -5,7 +5,7 @@
     android:id="@+id/cl_home"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context=".HomeFragment">
+    tools:context=".home.HomeFragment">
 
     <FrameLayout
         android:id="@+id/fl_home_dialog"
@@ -14,9 +14,7 @@
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent">
-
-    </FrameLayout>
+        app:layout_constraintTop_toTopOf="parent"/>
 
     <HorizontalScrollView
         android:id="@+id/hsv_map_toggles"

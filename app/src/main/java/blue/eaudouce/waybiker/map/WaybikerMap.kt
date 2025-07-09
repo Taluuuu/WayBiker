@@ -64,16 +64,9 @@ class WaybikerMap(
         annotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
         mapView.mapboxMap.addOnMoveListener(object : OnMoveListener {
-            override fun onMove(detector: MoveGestureDetector): Boolean {
-                return false
-            }
-
-            override fun onMoveBegin(detector: MoveGestureDetector) {
-            }
-
-            override fun onMoveEnd(detector: MoveGestureDetector) {
-                refreshMap()
-            }
+            override fun onMove(detector: MoveGestureDetector): Boolean { return false }
+            override fun onMoveBegin(detector: MoveGestureDetector) {}
+            override fun onMoveEnd(detector: MoveGestureDetector) { refreshMap() }
         })
     }
 
