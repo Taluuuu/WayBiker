@@ -18,6 +18,13 @@ import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 
 class MapAction_RateStreet(
@@ -106,16 +113,37 @@ class MapAction_RateStreet(
                 })
             }
             RatingState.RateStreet -> {
+                val ratingBar = StreetRatingBarView(tabContentView.context)
                 dialogView?.updateDialog(
                     "Rate your selection",
                     "",
                     { setState(RatingState.DefineStreetLength) },
                     {
+
+                        GlobalScope.launch {
+                            withContext(Dispatchers.IO) {
+                                val ratingsTable = waybikerMap.supabase.from("StreetRatings")
+                                selectedStreets
+                                    .zipWithNext()
+                                    .forEach { ends ->
+                                        val (from, to) = sortEnds(ends)
+                                        val rating = WaybikerMap.StreetRating(
+                                            from,
+                                            to,
+                                            ratingBar.rating.roundToInt().toShort()
+                                        )
+                                        ratingsTable.upsert(rating)
+                                    }
+                            }
+
+                            waybikerMap.refreshMap()
+                        }
+
                         finishAction()
                     }
                 )
 
-                dialogView?.setContent(StreetRatingBarView(tabContentView.context))
+                dialogView?.setContent(ratingBar)
             }
         }
     }

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    kotlin("plugin.serialization") version "2.1.10"
 }
 
 android {
@@ -10,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "blue.eaudouce.waybiker"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
@@ -61,4 +62,8 @@ dependencies {
 
     implementation("com.mapbox.maps:android:11.12.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.2.0"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.ktor:ktor-client-android:3.2.1")
 }

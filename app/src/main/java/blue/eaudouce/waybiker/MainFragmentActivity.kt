@@ -11,8 +11,6 @@ class MainFragmentActivity : FragmentActivity() {
     private var tracksFragment: TracksFragment? = null
     private var profileFragment: ProfileFragment? = null
 
-    private lateinit var waybikerMap: WaybikerMap
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -35,7 +33,7 @@ class MainFragmentActivity : FragmentActivity() {
             } ?: false
         }
 
-        waybikerMap = WaybikerMap(findViewById(R.id.mv_main_map))
+        val waybikerMap = WaybikerMap(findViewById(R.id.mv_main_map))
 
         homeFragment = HomeFragment(waybikerMap)
         tracksFragment = TracksFragment()

@@ -1,6 +1,7 @@
 package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
+import android.graphics.Color
 import android.util.Log
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -23,6 +24,14 @@ import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManag
 import com.mapbox.maps.plugin.gestures.OnMoveListener
 import com.mapbox.maps.plugin.gestures.addOnMoveListener
 import com.mapbox.maps.toCameraOptions
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -50,6 +59,20 @@ class WaybikerMap(
     val nodePositions = HashMap<Long, Point>()
 
     var onClickedStreet: ((StreetBit) -> (Unit))? = null
+
+    @Serializable
+    data class StreetRating(
+        val start: Long,
+        val end: Long,
+        val rating: Short
+    )
+
+    val supabase = createSupabaseClient(
+        supabaseUrl = "https://qjqjpjiqrsorvcvpsyfx.supabase.co",
+        supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqcWpwamlxcnNvcnZjdnBzeWZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxMTI0OTcsImV4cCI6MjA2NzY4ODQ5N30.tUCnvdT1hnw-55_baNiDLOOW8tfGMo7wQ-2oxQeZeGw"
+    ) {
+        install(Postgrest)
+    }
 
     init {
         mapView.mapboxMap.setCamera(
@@ -245,88 +268,145 @@ class WaybikerMap(
         return findNearestIntersectionToPoint(point, graphNodes.map { v -> v.key })
     }
 
+    // TODO: Remove duplicate in map action rate street
+    private fun sortEnds(ends: Pair<Long, Long>): Pair<Long, Long> {
+        return if (ends.first < ends.second)
+            Pair(ends.first, ends.second) else
+            Pair(ends.second, ends.first)
+    }
+
+    private fun calcStreetColor(rating: StreetRating?): String {
+        if (rating == null)
+            return "#9c9c9c"
+
+        val streetColorValues = arrayListOf(
+            Pair(0.0f, Color.RED),
+            Pair(0.5f, Color.YELLOW),
+            Pair(1.0f, Color.GREEN)
+        )
+
+        val alpha = rating.rating / 5.0f // TODO: Magic number bad
+        val colorRange = streetColorValues
+            .zipWithNext()
+            .find { (minColor, maxColor) ->
+                alpha >= minColor.first && alpha <= maxColor.first
+            } ?: return "#9c9c9c"
+
+        val (range0, range1) = colorRange
+        val (a0, c0) = range0
+        val (a1, c1) = range1
+
+        val withinRangeAlpha = (alpha - a0) / (a1 - a0)
+
+        val r0 = Color.red(c0)
+        val g0 = Color.green(c0)
+        val b0 = Color.blue(c0)
+
+        val r1 = Color.red(c1)
+        val g1 = Color.green(c1)
+        val b1 = Color.blue(c1)
+
+        val finalRed = (r0 + (r1 - r0) * withinRangeAlpha) / 255.0f
+        val finalGreen = (g0 + (g1 - g0) * withinRangeAlpha) / 255.0f
+        val finalBlue = (b0 + (b1 - b0) * withinRangeAlpha) / 255.0f
+
+        return String.format("#%06X", 0xFFFFFF and Color.rgb(finalRed, finalGreen, finalBlue))
+    }
+
     private fun makeMapGraph(elements: JSONArray) {
-        updateNodePositions(elements)
-        val fullStreetNodes = getFullStreetNodesByName(elements)
-        val intersectionNodes = findIntersectionNodes(fullStreetNodes)
 
-        // Add intersections to the graph
-        graphNodes.clear()
-        for (nodeId in intersectionNodes) {
-            graphNodes[nodeId] = Intersection(nodeId)
-        }
+        GlobalScope.launch {
+            withContext(Dispatchers.IO) {
+                val ratings = supabase.from("StreetRatings").select().decodeList<StreetRating>()
 
-        // Create links between nodes
-        graphLinks.clear()
-        for ((_, nodeIds) in fullStreetNodes) {
-            var prevIntersectionId: Long? = null
-            val segmentNodeIds = ArrayList<Long>()
-            for (nodeId in nodeIds) {
-                if (intersectionNodes.contains(nodeId)) {
-                    // nodeId is an intersection.
-                    if (prevIntersectionId != null) {
-                        segmentNodeIds.add(nodeId)
+                updateNodePositions(elements)
+                val fullStreetNodes = getFullStreetNodesByName(elements)
+                val intersectionNodes = findIntersectionNodes(fullStreetNodes)
 
-                        // Add this link to both nodes...
-                        val linkStart = graphNodes[prevIntersectionId]
-                        val linkEnd = graphNodes[nodeId]
-                        val streetBit = StreetBit(segmentNodeIds.toList())
-                        linkStart?.connectingStreets?.add(streetBit)
-                        linkEnd?.connectingStreets?.add(streetBit)
-
-                        graphLinks.add(streetBit)
-
-                        segmentNodeIds.clear()
-                    }
-
-                    prevIntersectionId = nodeId
+                // Add intersections to the graph
+                graphNodes.clear()
+                for (nodeId in intersectionNodes) {
+                    graphNodes[nodeId] = Intersection(nodeId)
                 }
 
-                if (prevIntersectionId != null)
-                    segmentNodeIds.add(nodeId)
+                // Create links between nodes
+                graphLinks.clear()
+                for ((_, nodeIds) in fullStreetNodes) {
+                    var prevIntersectionId: Long? = null
+                    val segmentNodeIds = ArrayList<Long>()
+                    for (nodeId in nodeIds) {
+                        if (intersectionNodes.contains(nodeId)) {
+                            // nodeId is an intersection.
+                            if (prevIntersectionId != null) {
+                                segmentNodeIds.add(nodeId)
+
+                                // Add this link to both nodes...
+                                val linkStart = graphNodes[prevIntersectionId]
+                                val linkEnd = graphNodes[nodeId]
+                                val streetBit = StreetBit(segmentNodeIds.toList())
+                                linkStart?.connectingStreets?.add(streetBit)
+                                linkEnd?.connectingStreets?.add(streetBit)
+
+                                graphLinks.add(streetBit)
+
+                                segmentNodeIds.clear()
+                            }
+
+                            prevIntersectionId = nodeId
+                        }
+
+                        if (prevIntersectionId != null)
+                            segmentNodeIds.add(nodeId)
+                    }
+                }
+
+                // Draw streets
+                for (streetBit in graphLinks)
+                {
+                    val polyLinePoints = ArrayList<Point>()
+                    for (nodeId in streetBit.nodeIds) {
+                        polyLinePoints.add(getNodePosition(nodeId))
+                    }
+
+                    val bitEnds = streetBit.getEnds()
+                    val jsonElement = JsonObject()
+                    jsonElement.addProperty("p0", bitEnds.first)
+                    jsonElement.addProperty("p1", bitEnds.second)
+
+                    val sortedEnds = sortEnds(bitEnds)
+                    val rating = ratings.find {
+                        rating -> rating.start == sortedEnds.first && rating.end == sortedEnds.second
+                    }
+
+                    val annotationOptions = PolylineAnnotationOptions()
+                        .withPoints(polyLinePoints)
+                        .withLineColor(calcStreetColor(rating))
+                        .withLineWidth(8.0)
+                        .withData(jsonElement)
+                    annotationMgr.create(annotationOptions)
+                }
+
+                // Allow clicking on streets
+                annotationMgr.addClickListener { annotation ->
+                    val data = annotation.getData() as JsonObject
+                    val p0 = data.get("p0").asLong
+                    val p1 = data.get("p1").asLong
+                    val streetBit = graphLinks.find { streetBit ->
+                        val ends = streetBit.getEnds()
+                        ends.first == p0 && ends.second == p1
+                    }
+
+                    if (streetBit != null)
+                        onClickedStreet?.invoke(streetBit)
+
+                    false
+                }
             }
-        }
-
-        // Draw streets
-        for (streetBit in graphLinks)
-        {
-            val polyLinePoints = ArrayList<Point>()
-            for (nodeId in streetBit.nodeIds) {
-                polyLinePoints.add(getNodePosition(nodeId))
-            }
-
-            val bitEnds = streetBit.getEnds()
-            val jsonElement = JsonObject()
-            jsonElement.addProperty("p0", bitEnds.first)
-            jsonElement.addProperty("p1", bitEnds.second)
-
-            val annotationOptions = PolylineAnnotationOptions()
-                .withPoints(polyLinePoints)
-                .withLineColor("#9c9c9c")
-                .withLineWidth(8.0)
-                .withData(jsonElement)
-            annotationMgr.create(annotationOptions)
-        }
-
-        // Allow clicking on streets
-        annotationMgr.addClickListener { annotation ->
-            val data = annotation.getData() as JsonObject
-            val p0 = data.get("p0").asLong
-            val p1 = data.get("p1").asLong
-            val streetBit = graphLinks.find { streetBit ->
-                val ends = streetBit.getEnds()
-                ends.first == p0 && ends.second == p1
-            }
-
-            if (streetBit != null)
-                onClickedStreet?.invoke(streetBit)
-
-            false
         }
     }
 
     @SuppressLint("DefaultLocale")
-    private fun refreshMap() {
+    fun refreshMap() {
         val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
 
         val query = String.format("""
