@@ -42,11 +42,11 @@ class MapDialogView(context: Context) : FrameLayout(context) {
 
     // Support multiple content views ?
     fun setContent(view: View?) {
-        val content_view = findViewById<FrameLayout>(R.id.fl_dialog_content)
+        val contentView = findViewById<FrameLayout>(R.id.fl_dialog_content)
         if (view == null) {
-            content_view.removeAllViews()
+            contentView.removeAllViews()
         } else {
-            content_view.addView(view)
+            contentView.addView(view)
         }
     }
 }
