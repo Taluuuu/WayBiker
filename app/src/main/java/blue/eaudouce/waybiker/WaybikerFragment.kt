@@ -7,7 +7,7 @@ import blue.eaudouce.waybiker.home.HomeFragment
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
-class WaybikerFragment : Fragment(R.layout.fragment_waybiker) {
+class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
     private var homeFragment: HomeFragment? = null
     private var tracksFragment: TracksFragment? = null
     private var profileFragment: ProfileFragment? = null
