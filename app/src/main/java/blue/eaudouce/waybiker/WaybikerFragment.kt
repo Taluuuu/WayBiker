@@ -6,6 +6,7 @@ import androidx.fragment.app.Fragment
 import blue.eaudouce.waybiker.home.HomeFragment
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import io.github.jan.supabase.auth.auth
 
 class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
     private var homeFragment: HomeFragment? = null

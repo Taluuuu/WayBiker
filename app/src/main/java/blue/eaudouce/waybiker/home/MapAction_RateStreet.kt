@@ -46,7 +46,7 @@ class MapAction_RateStreet(
     private val selectionAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
     private var dialogView: MapDialogView? = null
 
-    private val lifecycleScope = CoroutineScope(Dispatchers.IO)
+    private val lifecycleScope = CoroutineScope(Dispatchers.Main)
 
     private enum class RatingState {
         Inactive,
@@ -130,28 +130,30 @@ class MapAction_RateStreet(
                     { setState(RatingState.DefineStreetLength) },
                     {
                         lifecycleScope.launch {
-                            try {
-                                val ratingsTable = SupabaseInstance.client.from("street_ratings")
-                                selectedStreets
-                                    .zipWithNext()
-                                    .forEach { ends ->
-                                        val (from, to) = sortEnds(ends)
-                                        val rating = WaybikerMap.StreetRating(
-                                            start = from,
-                                            end = to,
-                                            rating = ratingBar.rating.roundToInt().toShort(),
-                                            user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
-                                        )
-                                        ratingsTable.upsert(rating)
-                                    }
-
-                                waybikerMap.queueRefreshMap()
-                            } catch (e: Exception) {
-                                // TODO: Show error
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    val ratingsTable = SupabaseInstance.client.from("street_ratings")
+                                    selectedStreets
+                                        .zipWithNext()
+                                        .forEach { ends ->
+                                            val (from, to) = sortEnds(ends)
+                                            val rating = WaybikerMap.StreetRating(
+                                                start = from,
+                                                end = to,
+                                                rating = ratingBar.rating.roundToInt().toShort(),
+                                                user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
+                                            )
+                                            ratingsTable.upsert(rating)
+                                        }
+                                } catch (e: Exception) {
+                                    // TODO: Show error
+                                }
                             }
+
+                            waybikerMap.queueRefreshMap()
+                            finishAction()
                         }
 
-                        finishAction()
                     }
                 )
 
