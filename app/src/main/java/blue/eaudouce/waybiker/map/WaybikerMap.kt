@@ -4,32 +4,28 @@ import android.annotation.SuppressLint
 import android.graphics.Color
 import android.util.Log
 import blue.eaudouce.waybiker.SupabaseInstance
-import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.mapbox.android.gestures.MoveGestureDetector
+import com.mapbox.android.gestures.ShoveGestureDetector
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
-import com.mapbox.maps.plugin.annotation.Annotation
+import com.mapbox.maps.coroutine.cameraChangedEvents
+import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
-import com.mapbox.maps.plugin.annotation.generated.CircleAnnotation
-import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
-import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
-import com.mapbox.maps.plugin.annotation.generated.OnCircleAnnotationDragListener
-import com.mapbox.maps.plugin.annotation.generated.OnPolylineAnnotationClickListener
-import com.mapbox.maps.plugin.annotation.generated.OnPolylineAnnotationDragListener
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
-import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import com.mapbox.maps.plugin.gestures.OnMoveListener
+import com.mapbox.maps.plugin.gestures.OnShoveListener
+import com.mapbox.maps.plugin.gestures.addOnFlingListener
 import com.mapbox.maps.plugin.gestures.addOnMoveListener
+import com.mapbox.maps.plugin.gestures.addOnShoveListener
 import com.mapbox.maps.toCameraOptions
-import io.github.jan.supabase.createSupabaseClient
-import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -44,18 +40,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
-import java.util.UUID
 import kotlin.math.cos
 import kotlin.math.sqrt
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 class WaybikerMap(
     val mapView: MapView
 ) {
-
-    // TEMP: Draw debug stuff
-    private val annotationMgr: PolylineAnnotationManager
+    private val streetAnnotationMgr: PolylineAnnotationManager
+    private val streetAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
 
     // Map graph data
     val graphLinks = ArrayList<StreetBit>()
@@ -63,6 +55,9 @@ class WaybikerMap(
     val nodePositions = HashMap<Long, Point>()
 
     var onClickedStreet: ((StreetBit) -> (Unit))? = null
+
+    private val lifecycleScope = CoroutineScope(Dispatchers.Main)
+    private var pendingMapRefresh = false
 
     @Serializable
     data class StreetRating(
@@ -82,13 +77,26 @@ class WaybikerMap(
                 .build()
         )
 
-        annotationMgr = mapView.annotations.createPolylineAnnotationManager()
+        streetAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
-        mapView.mapboxMap.addOnMoveListener(object : OnMoveListener {
-            override fun onMove(detector: MoveGestureDetector): Boolean { return false }
-            override fun onMoveBegin(detector: MoveGestureDetector) {}
-            override fun onMoveEnd(detector: MoveGestureDetector) { refreshMap() }
-        })
+        // Allow clicking on streets
+        streetAnnotationMgr.addClickListener { annotation ->
+            val data = annotation.getData() as JsonObject
+            val p0 = data.get("p0").asLong
+            val p1 = data.get("p1").asLong
+            val streetBit = graphLinks.find { streetBit ->
+                val ends = streetBit.getEnds()
+                ends.first == p0 && ends.second == p1
+            }
+
+            if (streetBit != null)
+                onClickedStreet?.invoke(streetBit)
+
+            false
+        }
+
+        mapView.mapboxMap.subscribeMapIdle { if (pendingMapRefresh) refreshMap() }
+        mapView.mapboxMap.subscribeCameraChanged { queueRefreshMap() }
     }
 
     fun getConnectedIntersections(nodeId: Long): ArrayList<Long> {
@@ -313,98 +321,116 @@ class WaybikerMap(
 
     private fun makeMapGraph(elements: JSONArray) {
 
-        GlobalScope.launch {
+        lifecycleScope.launch {
+            var ratings: List<StreetRating>
             withContext(Dispatchers.IO) {
-                val ratings = SupabaseInstance.client.from("street_ratings").select().decodeList<StreetRating>()
+                ratings = SupabaseInstance.client
+                    .from("street_ratings")
+                    .select()
+                    .decodeList<StreetRating>()
+            }
 
-                updateNodePositions(elements)
-                val fullStreetNodes = getFullStreetNodesByName(elements)
-                val intersectionNodes = findIntersectionNodes(fullStreetNodes)
+            updateNodePositions(elements)
+            val fullStreetNodes = getFullStreetNodesByName(elements)
+            val intersectionNodes = findIntersectionNodes(fullStreetNodes)
 
-                // Add intersections to the graph
-                graphNodes.clear()
-                for (nodeId in intersectionNodes) {
-                    graphNodes[nodeId] = Intersection(nodeId)
-                }
+            // Add intersections to the graph
+            graphNodes.clear()
+            for (nodeId in intersectionNodes) {
+                graphNodes[nodeId] = Intersection(nodeId)
+            }
 
-                // Create links between nodes
-                graphLinks.clear()
-                for ((_, nodeIds) in fullStreetNodes) {
-                    var prevIntersectionId: Long? = null
-                    val segmentNodeIds = ArrayList<Long>()
-                    for (nodeId in nodeIds) {
-                        if (intersectionNodes.contains(nodeId)) {
-                            // nodeId is an intersection.
-                            if (prevIntersectionId != null) {
-                                segmentNodeIds.add(nodeId)
+            // Create links between nodes
+            graphLinks.clear()
+            for ((_, nodeIds) in fullStreetNodes) {
+                var prevIntersectionId: Long? = null
+                val segmentNodeIds = ArrayList<Long>()
+                for (nodeId in nodeIds) {
+                    if (intersectionNodes.contains(nodeId)) {
+                        // nodeId is an intersection.
+                        if (prevIntersectionId != null) {
+                            segmentNodeIds.add(nodeId)
 
-                                // Add this link to both nodes...
-                                val linkStart = graphNodes[prevIntersectionId]
-                                val linkEnd = graphNodes[nodeId]
-                                val streetBit = StreetBit(segmentNodeIds.toList())
-                                linkStart?.connectingStreets?.add(streetBit)
-                                linkEnd?.connectingStreets?.add(streetBit)
+                            // Add this link to both nodes...
+                            val linkStart = graphNodes[prevIntersectionId]
+                            val linkEnd = graphNodes[nodeId]
+                            val streetBit = StreetBit(segmentNodeIds.toList())
+                            linkStart?.connectingStreets?.add(streetBit)
+                            linkEnd?.connectingStreets?.add(streetBit)
 
-                                graphLinks.add(streetBit)
+                            graphLinks.add(streetBit)
 
-                                segmentNodeIds.clear()
-                            }
-
-                            prevIntersectionId = nodeId
+                            segmentNodeIds.clear()
                         }
 
-                        if (prevIntersectionId != null)
-                            segmentNodeIds.add(nodeId)
+                        prevIntersectionId = nodeId
                     }
+
+                    if (prevIntersectionId != null)
+                        segmentNodeIds.add(nodeId)
+                }
+            }
+
+            // Delete previous annotations
+            val updatedLinks = HashSet<Pair<Long, Long>>()
+            for (streetBit in graphLinks) {
+                updatedLinks.add(sortEnds(streetBit.getEnds()))
+            }
+            streetAnnotations.entries.removeAll { (link, annotation) ->
+                if (updatedLinks.contains(link)) {
+                    false
                 }
 
-                // Draw streets
-                for (streetBit in graphLinks)
-                {
-                    val polyLinePoints = ArrayList<Point>()
-                    for (nodeId in streetBit.nodeIds) {
-                        polyLinePoints.add(getNodePosition(nodeId))
-                    }
+                streetAnnotationMgr.delete(annotation)
+                true
+            }
 
-                    val bitEnds = streetBit.getEnds()
+            // Draw streets
+            for (streetBit in graphLinks)
+            {
+                val polyLinePoints = ArrayList<Point>()
+                for (nodeId in streetBit.nodeIds) {
+                    polyLinePoints.add(getNodePosition(nodeId))
+                }
+
+                val bitEnds = streetBit.getEnds()
+                val sortedEnds = sortEnds(bitEnds)
+                val annotation = streetAnnotations[sortedEnds]
+
+                val rating = ratings.find {
+                    rating -> rating.start == sortedEnds.first && rating.end == sortedEnds.second
+                }
+
+                if (annotation == null) {
+
                     val jsonElement = JsonObject()
                     jsonElement.addProperty("p0", bitEnds.first)
                     jsonElement.addProperty("p1", bitEnds.second)
-
-                    val sortedEnds = sortEnds(bitEnds)
-                    val rating = ratings.find {
-                        rating -> rating.start == sortedEnds.first && rating.end == sortedEnds.second
-                    }
 
                     val annotationOptions = PolylineAnnotationOptions()
                         .withPoints(polyLinePoints)
                         .withLineColor(calcStreetColor(rating))
                         .withLineWidth(8.0)
                         .withData(jsonElement)
-                    annotationMgr.create(annotationOptions)
-                }
+                    streetAnnotations[sortedEnds] = streetAnnotationMgr.create(annotationOptions)
 
-                // Allow clicking on streets
-                annotationMgr.addClickListener { annotation ->
-                    val data = annotation.getData() as JsonObject
-                    val p0 = data.get("p0").asLong
-                    val p1 = data.get("p1").asLong
-                    val streetBit = graphLinks.find { streetBit ->
-                        val ends = streetBit.getEnds()
-                        ends.first == p0 && ends.second == p1
-                    }
+                } else {
 
-                    if (streetBit != null)
-                        onClickedStreet?.invoke(streetBit)
+                    annotation.lineColorString = calcStreetColor(rating)
+                    streetAnnotationMgr.update(annotation)
 
-                    false
                 }
             }
         }
     }
 
+    fun queueRefreshMap() {
+        pendingMapRefresh = true
+    }
+
     @SuppressLint("DefaultLocale")
     fun refreshMap() {
+        pendingMapRefresh = false
         val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
 
         val query = String.format("""
@@ -433,8 +459,6 @@ class WaybikerMap(
             }
 
             override fun onResponse(call: Call, response: Response) {
-                annotationMgr.deleteAll()
-
                 val body = response.body?.string() ?: return
                 val json = JSONObject(body)
                 val elements = json.getJSONArray("elements")

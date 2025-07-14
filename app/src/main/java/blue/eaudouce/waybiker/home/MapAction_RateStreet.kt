@@ -3,6 +3,8 @@ package blue.eaudouce.waybiker.home
 import android.content.Context
 import android.widget.FrameLayout
 import android.widget.RatingBar
+import androidx.lifecycle.LifecycleCoroutineScope
+import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.StreetBit
@@ -21,11 +23,13 @@ import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.Dispatcher
 import kotlin.math.roundToInt
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -41,6 +45,8 @@ class MapAction_RateStreet(
     private val selectedStreets = ArrayDeque<Long>()
     private val selectionAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
     private var dialogView: MapDialogView? = null
+
+    private val lifecycleScope = CoroutineScope(Dispatchers.IO)
 
     private enum class RatingState {
         Inactive,
@@ -123,9 +129,8 @@ class MapAction_RateStreet(
                     "",
                     { setState(RatingState.DefineStreetLength) },
                     {
-
-                        GlobalScope.launch {
-                            withContext(Dispatchers.IO) {
+                        lifecycleScope.launch {
+                            try {
                                 val ratingsTable = SupabaseInstance.client.from("street_ratings")
                                 selectedStreets
                                     .zipWithNext()
@@ -139,9 +144,11 @@ class MapAction_RateStreet(
                                         )
                                         ratingsTable.upsert(rating)
                                     }
-                            }
 
-                            waybikerMap.refreshMap()
+                                waybikerMap.queueRefreshMap()
+                            } catch (e: Exception) {
+                                // TODO: Show error
+                            }
                         }
 
                         finishAction()
