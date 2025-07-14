@@ -4,6 +4,7 @@ import android.content.Context
 import android.widget.FrameLayout
 import android.widget.RatingBar
 import blue.eaudouce.waybiker.R
+import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.StreetBit
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.gson.JsonObject
@@ -18,6 +19,7 @@ import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
@@ -25,6 +27,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 
 class MapAction_RateStreet(
@@ -122,15 +126,16 @@ class MapAction_RateStreet(
 
                         GlobalScope.launch {
                             withContext(Dispatchers.IO) {
-                                val ratingsTable = waybikerMap.supabase.from("StreetRatings")
+                                val ratingsTable = SupabaseInstance.client.from("street_ratings")
                                 selectedStreets
                                     .zipWithNext()
                                     .forEach { ends ->
                                         val (from, to) = sortEnds(ends)
                                         val rating = WaybikerMap.StreetRating(
-                                            from,
-                                            to,
-                                            ratingBar.rating.roundToInt().toShort()
+                                            start = from,
+                                            end = to,
+                                            rating = ratingBar.rating.roundToInt().toShort(),
+                                            user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
                                         )
                                         ratingsTable.upsert(rating)
                                     }

@@ -16,7 +16,7 @@ class WelcomeFragment : MainAppFragment(R.layout.fragment_welcome) {
 
         val createAccountButton = view.findViewById<Button>(R.id.btn_create_account)
         createAccountButton?.setOnClickListener {
-            onFinished?.invoke(WaybikerFragment())
+            onFinished?.invoke(CreateAccountFragment())
         }
     }
 }

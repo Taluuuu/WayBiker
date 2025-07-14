@@ -3,6 +3,7 @@ package blue.eaudouce.waybiker.map
 import android.annotation.SuppressLint
 import android.graphics.Color
 import android.util.Log
+import blue.eaudouce.waybiker.SupabaseInstance
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.mapbox.android.gestures.MoveGestureDetector
@@ -43,8 +44,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import java.util.UUID
 import kotlin.math.cos
 import kotlin.math.sqrt
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 class WaybikerMap(
     val mapView: MapView
@@ -64,15 +68,9 @@ class WaybikerMap(
     data class StreetRating(
         val start: Long,
         val end: Long,
-        val rating: Short
+        val rating: Short,
+        val user_id: String
     )
-
-    val supabase = createSupabaseClient(
-        supabaseUrl = "https://qjqjpjiqrsorvcvpsyfx.supabase.co",
-        supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqcWpwamlxcnNvcnZjdnBzeWZ4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTIxMTI0OTcsImV4cCI6MjA2NzY4ODQ5N30.tUCnvdT1hnw-55_baNiDLOOW8tfGMo7wQ-2oxQeZeGw"
-    ) {
-        install(Postgrest)
-    }
 
     init {
         mapView.mapboxMap.setCamera(
@@ -317,7 +315,7 @@ class WaybikerMap(
 
         GlobalScope.launch {
             withContext(Dispatchers.IO) {
-                val ratings = supabase.from("StreetRatings").select().decodeList<StreetRating>()
+                val ratings = SupabaseInstance.client.from("street_ratings").select().decodeList<StreetRating>()
 
                 updateNodePositions(elements)
                 val fullStreetNodes = getFullStreetNodesByName(elements)

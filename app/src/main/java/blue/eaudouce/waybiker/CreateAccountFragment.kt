@@ -7,9 +7,10 @@ import android.widget.EditText
 import androidx.lifecycle.lifecycleScope
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 
-class LogInFragment : MainAppFragment(R.layout.fragment_log_in) {
+class CreateAccountFragment : MainAppFragment(R.layout.fragment_create_account) {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
@@ -25,7 +26,7 @@ class LogInFragment : MainAppFragment(R.layout.fragment_log_in) {
 
             lifecycleScope.launch {
                 try {
-                    SupabaseInstance.client.auth.signInWith(Email) {
+                    val result = SupabaseInstance.client.auth.signUpWith(Email) {
                         email = usernameText.text.toString()
                         password = passwordText.text.toString()
                     }
