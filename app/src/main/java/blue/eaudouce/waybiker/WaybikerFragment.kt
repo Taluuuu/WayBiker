@@ -35,7 +35,7 @@ class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
 
         val waybikerMap = WaybikerMap(view.findViewById(R.id.mv_main_map))
 
-        homeFragment = HomeFragment(waybikerMap)
+        homeFragment = HomeFragment.newInstance(waybikerMap)
         tracksFragment = TracksFragment()
         profileFragment = ProfileFragment()
 

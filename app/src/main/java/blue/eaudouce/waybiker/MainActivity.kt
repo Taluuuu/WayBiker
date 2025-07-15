@@ -15,8 +15,8 @@ import androidx.core.content.edit
 class MainActivity : FragmentActivity(R.layout.main_activity) {
     private var currentFragment: MainAppFragment? = null
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+    override fun onResume() {
+        super.onResume()
 
         // Restore session
         val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
@@ -40,6 +40,11 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
         } else {
             setCurrentFragment(WaybikerFragment())
         }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
 
     }
 

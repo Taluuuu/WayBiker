@@ -9,13 +9,20 @@ import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
-class HomeFragment(
-    private val waybikerMap: WaybikerMap
-) : Fragment(R.layout.fragment_home) {
+class HomeFragment : Fragment(R.layout.fragment_home) {
 
     // The currently running action
     private var mapAction: MapAction_Base? = null
     private var viewsHiddenDuringAction = ArrayList<View>()
+    private lateinit var waybikerMap: WaybikerMap
+
+    companion object {
+        fun newInstance(waybikerMap: WaybikerMap) : HomeFragment {
+            val instance = HomeFragment()
+            instance.waybikerMap = waybikerMap
+            return instance
+        }
+    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
