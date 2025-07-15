@@ -33,6 +33,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             startAction()
         }
 
+        val recordTrackButton = view.findViewById<FloatingActionButton>(R.id.fab_record_track)
+        recordTrackButton.setOnClickListener {
+            mapAction = MapAction_RecordTrack(waybikerMap, view.findViewById(R.id.fl_home_dialog))
+            startAction()
+        }
+
         viewsHiddenDuringAction.add(view.findViewById(R.id.hsv_map_toggles))
         viewsHiddenDuringAction.add(view.findViewById(R.id.ll_action_buttons))
     }

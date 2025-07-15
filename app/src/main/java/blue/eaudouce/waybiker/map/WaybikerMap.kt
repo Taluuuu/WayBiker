@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.graphics.Color
 import android.util.Log
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
+import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
 import com.google.gson.JsonObject
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.android.gestures.ShoveGestureDetector
@@ -431,7 +433,9 @@ class WaybikerMap(
     @SuppressLint("DefaultLocale")
     fun refreshMap() {
         pendingMapRefresh = false
-        val bounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
+        val coordBounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
+        val tileBounds = coordinateBoundsToTileBounds(coordBounds)
+        val finalBounds = tileBoundsToCoordinateBounds(tileBounds)
 
         val query = String.format("""
             [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
@@ -441,7 +445,7 @@ class WaybikerMap(
             out body;
             >;
             out skel qt;
-        """, bounds.south() - 0.002f, bounds.west() - 0.002f, bounds.north() + 0.002f, bounds.east() + 0.002f).trimIndent()
+        """, finalBounds.south(), finalBounds.west(), finalBounds.north(), finalBounds.east()).trimIndent()
 
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val requestBody = "data=$encodedQuery"
