@@ -1,11 +1,19 @@
 package blue.eaudouce.waybiker.map
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
+import android.location.Location
+import android.os.Handler
 import android.util.Log
+import androidx.core.app.ActivityCompat
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
 import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import com.google.gson.JsonObject
 import com.mapbox.android.gestures.MoveGestureDetector
 import com.mapbox.android.gestures.ShoveGestureDetector
@@ -46,7 +54,8 @@ import kotlin.math.cos
 import kotlin.math.sqrt
 
 class WaybikerMap(
-    val mapView: MapView
+    val mapView: MapView,
+    val context: Context?
 ) {
     private val streetAnnotationMgr: PolylineAnnotationManager
     private val streetAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
@@ -60,6 +69,8 @@ class WaybikerMap(
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
     private var pendingMapRefresh = false
+
+    private var locationClient: FusedLocationProviderClient? = null
 
     @Serializable
     data class StreetRating(
@@ -99,6 +110,21 @@ class WaybikerMap(
 
         mapView.mapboxMap.subscribeMapIdle { if (pendingMapRefresh) refreshMap() }
         mapView.mapboxMap.subscribeCameraChanged { queueRefreshMap() }
+
+        context?.let {
+            locationClient = LocationServices.getFusedLocationProviderClient(it)
+            if (ActivityCompat.checkSelfPermission(context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED) {
+//                ActivityCompat.requestPermissions()
+
+//                locationClient.
+//                locationClient?.lastLocation?.addOnSuccessListener { location ->
+//                    println(location.longitude)
+//                    println(location.latitude)
+//                }
+            }
+        }
     }
 
     fun getConnectedIntersections(nodeId: Long): ArrayList<Long> {
