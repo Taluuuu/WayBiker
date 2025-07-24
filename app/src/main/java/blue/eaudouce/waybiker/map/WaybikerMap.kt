@@ -1,37 +1,27 @@
 package blue.eaudouce.waybiker.map
 
-import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.Location
-import android.os.Handler
 import android.util.Log
-import androidx.core.app.ActivityCompat
+import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
 import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
-import com.google.android.gms.location.FusedLocationProviderClient
-import com.google.android.gms.location.LocationServices
 import com.google.gson.JsonObject
-import com.mapbox.android.gestures.MoveGestureDetector
-import com.mapbox.android.gestures.ShoveGestureDetector
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
 import com.mapbox.maps.MapView
-import com.mapbox.maps.coroutine.cameraChangedEvents
-import com.mapbox.maps.plugin.animation.camera
 import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotation
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
-import com.mapbox.maps.plugin.gestures.OnMoveListener
-import com.mapbox.maps.plugin.gestures.OnShoveListener
-import com.mapbox.maps.plugin.gestures.addOnFlingListener
-import com.mapbox.maps.plugin.gestures.addOnMoveListener
-import com.mapbox.maps.plugin.gestures.addOnShoveListener
 import com.mapbox.maps.toCameraOptions
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
@@ -60,17 +50,21 @@ class WaybikerMap(
     private val streetAnnotationMgr: PolylineAnnotationManager
     private val streetAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
 
+    private val locationAnnotationMgr: CircleAnnotationManager
+    private var locationAnnotation: CircleAnnotation? = null
+    private var locationShadowAnnotation: CircleAnnotation? = null
+
     // Map graph data
     val graphLinks = ArrayList<StreetBit>()
     val graphNodes = HashMap<Long, Intersection>()
     val nodePositions = HashMap<Long, Point>()
 
     var onClickedStreet: ((StreetBit) -> (Unit))? = null
+    var onLocationUpdated: ((Point) -> (Unit))? = null
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
     private var pendingMapRefresh = false
-
-    private var locationClient: FusedLocationProviderClient? = null
+    private var isFirstLocationUpdate = true
 
     @Serializable
     data class StreetRating(
@@ -81,16 +75,8 @@ class WaybikerMap(
     )
 
     init {
-        mapView.mapboxMap.setCamera(
-            CameraOptions.Builder()
-                .center(Point.fromLngLat(-73.5824535409464, 45.49576954424193))
-                .pitch(0.0)
-                .zoom(16.0)
-                .bearing(0.0)
-                .build()
-        )
-
         streetAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
+        locationAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
 
         // Allow clicking on streets
         streetAnnotationMgr.addClickListener { annotation ->
@@ -110,21 +96,53 @@ class WaybikerMap(
 
         mapView.mapboxMap.subscribeMapIdle { if (pendingMapRefresh) refreshMap() }
         mapView.mapboxMap.subscribeCameraChanged { queueRefreshMap() }
+    }
 
-        context?.let {
-            locationClient = LocationServices.getFusedLocationProviderClient(it)
-            if (ActivityCompat.checkSelfPermission(context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED) {
-//                ActivityCompat.requestPermissions()
+    fun onLocationUpdated(location: Location) {
+        val point = Point.fromLngLat(location.longitude, location.latitude)
 
-//                locationClient.
-//                locationClient?.lastLocation?.addOnSuccessListener { location ->
-//                    println(location.longitude)
-//                    println(location.latitude)
-//                }
-            }
+        if (isFirstLocationUpdate) {
+
+            val shadowOptions = CircleAnnotationOptions()
+                .withPoint(point)
+                .withCircleRadius(25.0)
+                .withCircleColor(Color.BLACK)
+                .withCircleBlur(1.0)
+
+            locationShadowAnnotation = locationAnnotationMgr.create(shadowOptions)
+
+            val puckOptions = CircleAnnotationOptions()
+                .withPoint(point)
+                .withCircleRadius(12.0)
+                .withCircleColor("#3468ed".toColorInt())
+                .withCircleStrokeColor(Color.WHITE)
+                .withCircleStrokeWidth(5.0)
+
+            locationAnnotation = locationAnnotationMgr.create(puckOptions)
+
+            mapView.mapboxMap.setCamera(
+                CameraOptions.Builder()
+                    .center(point)
+                    .pitch(0.0)
+                    .zoom(16.0)
+                    .bearing(0.0)
+                    .build()
+            )
+
+            isFirstLocationUpdate = false
         }
+
+        locationAnnotation?.let {
+            it.point = point
+            locationAnnotationMgr.update(it)
+        }
+
+        locationShadowAnnotation?.let {
+            it.point = point
+            locationAnnotationMgr.update(it)
+        }
+
+        onLocationUpdated?.invoke(point)
     }
 
     fun getConnectedIntersections(nodeId: Long): ArrayList<Long> {
@@ -264,7 +282,7 @@ class WaybikerMap(
         return result
     }
 
-    private fun calcPointDistanceSqr(p1: Point, p2: Point): Double {
+    fun calcPointDistanceSqr(p1: Point, p2: Point): Double {
         // From ChatGPT
         val w1 = Math.toRadians(p1.latitude())
         val w2 = Math.toRadians(p2.latitude())

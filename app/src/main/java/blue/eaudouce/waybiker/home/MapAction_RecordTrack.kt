@@ -1,9 +1,15 @@
 package blue.eaudouce.waybiker.home
 
 import android.content.Context
+import android.graphics.Color
 import android.widget.FrameLayout
-import blue.eaudouce.waybiker.home.MapAction_RateStreet.RatingState
 import blue.eaudouce.waybiker.map.WaybikerMap
+import com.mapbox.geojson.Point
+import com.mapbox.maps.plugin.annotation.annotations
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 
 class MapAction_RecordTrack(
     private val waybikerMap: WaybikerMap,
@@ -21,6 +27,20 @@ class MapAction_RecordTrack(
 
     private var currentState = RecordState.Inactive
 
+    private val recordedPathNodes = ArrayList<Long>()
+    private val recordedPathPoints = ArrayList<Point>()
+    private val recordedPathAnnotation: PolylineAnnotation
+    private val lineAnnotationMgr: PolylineAnnotationManager = waybikerMap.mapView.annotations.createPolylineAnnotationManager()
+
+    init {
+        val options = PolylineAnnotationOptions()
+            .withPoints(recordedPathPoints)
+            .withLineWidth(15.0)
+            .withLineColor(Color.CYAN)
+
+        recordedPathAnnotation = lineAnnotationMgr.create(options)
+    }
+
     private fun setState(newState: RecordState) {
         if (currentState == newState)
             return
@@ -28,13 +48,15 @@ class MapAction_RecordTrack(
         // Exit previous state logic
         when (currentState) {
             RecordState.Inactive -> {
-
+                lineAnnotationMgr.delete(recordedPathAnnotation)
+                recordedPathNodes.clear()
+                recordedPathPoints.clear()
             }
             RecordState.Intro -> {
 
             }
             RecordState.Recording -> {
-
+                waybikerMap.onLocationUpdated = null
             }
             RecordState.PostRecording -> {
 
@@ -63,6 +85,8 @@ class MapAction_RecordTrack(
                     { setState(RecordState.Intro) },
                     { setState(RecordState.PostRecording) }
                 )
+
+                waybikerMap.onLocationUpdated = { onLocationUpdated(it) }
             }
             RecordState.PostRecording -> {
                 dialogView?.updateDialog(
@@ -90,4 +114,28 @@ class MapAction_RecordTrack(
         super.finishAction()
     }
 
+    private fun onLocationUpdated(location: Point) {
+        var nearestPointId = -1L
+        var minDistance = Double.MAX_VALUE
+        for (link in waybikerMap.graphLinks) {
+            for (pointId in link.nodeIds) {
+                val point = waybikerMap.getNodePosition(pointId)
+                val dist = waybikerMap.calcPointDistanceSqr(location, point)
+                if (dist < minDistance) {
+                    minDistance = dist
+                    nearestPointId = pointId
+                }
+            }
+        }
+
+        if (recordedPathNodes.isNotEmpty() && recordedPathNodes.last() == nearestPointId) {
+            return
+        }
+
+        // We have reached a new point.
+        recordedPathNodes.add(nearestPointId)
+        recordedPathPoints.add(waybikerMap.getNodePosition(nearestPointId))
+
+        lineAnnotationMgr.update(recordedPathAnnotation)
+    }
 }

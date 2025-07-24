@@ -11,12 +11,17 @@ import io.github.jan.supabase.network.SupabaseApi
 import io.github.jan.supabase.plugins.SupabasePlugin
 import kotlinx.coroutines.launch
 import androidx.core.content.edit
+import com.google.android.gms.location.FusedLocationProviderClient
 
 class MainActivity : FragmentActivity(R.layout.main_activity) {
     private var currentFragment: MainAppFragment? = null
 
-    override fun onResume() {
-        super.onResume()
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        if (savedInstanceState != null) {
+            return
+        }
 
         // Restore session
         val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
@@ -31,21 +36,16 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
         val refreshToken = sharedPreferences.getString("refreshToken", "")
 
         lifecycleScope.launch {
-            if (refreshToken?.isNotEmpty() ?: false)
+            if (refreshToken?.isNotEmpty() ?: false) {
                 SupabaseInstance.client.auth.refreshSession(refreshToken)
+            }
+
+            if (SupabaseInstance.client.auth.currentSessionOrNull() == null) {
+                setCurrentFragment(WelcomeFragment())
+            } else {
+                setCurrentFragment(WaybikerFragment())
+            }
         }
-
-        if (SupabaseInstance.client.auth.currentSessionOrNull() == null) {
-            setCurrentFragment(WelcomeFragment())
-        } else {
-            setCurrentFragment(WaybikerFragment())
-        }
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-
-
     }
 
     override fun onPause() {
