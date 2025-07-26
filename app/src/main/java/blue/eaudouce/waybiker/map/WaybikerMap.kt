@@ -7,6 +7,7 @@ import android.location.Location
 import android.util.Log
 import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
 import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
 import com.google.gson.JsonObject
@@ -17,10 +18,13 @@ import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotation
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.PolygonAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import com.mapbox.maps.toCameraOptions
 import io.github.jan.supabase.postgrest.from
@@ -54,6 +58,9 @@ class WaybikerMap(
     private var locationAnnotation: CircleAnnotation? = null
     private var locationShadowAnnotation: CircleAnnotation? = null
 
+    private val testAnnotationMgr: PolygonAnnotationManager
+    private val testBorderAnnotationMgr: PolylineAnnotationManager
+
     // Map graph data
     val graphLinks = ArrayList<StreetBit>()
     val graphNodes = HashMap<Long, Intersection>()
@@ -77,6 +84,8 @@ class WaybikerMap(
     init {
         streetAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
         locationAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
+        testAnnotationMgr = mapView.annotations.createPolygonAnnotationManager()
+        testBorderAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
         // Allow clicking on streets
         streetAnnotationMgr.addClickListener { annotation ->
@@ -476,6 +485,10 @@ class WaybikerMap(
 
     @SuppressLint("DefaultLocale")
     fun refreshMap() {
+        if (isFirstLocationUpdate) {
+            return
+        }
+
         pendingMapRefresh = false
         val coordBounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
         val tileBounds = coordinateBoundsToTileBounds(coordBounds)
@@ -490,6 +503,30 @@ class WaybikerMap(
             >;
             out skel qt;
         """, finalBounds.south(), finalBounds.west(), finalBounds.north(), finalBounds.east()).trimIndent()
+
+//        testAnnotationMgr.deleteAll()
+//        val testPoints = listOf(finalBounds.northwest(), finalBounds.northeast, finalBounds.southeast(), finalBounds.southwest, finalBounds.northwest())
+//        val polygonOptions = PolygonAnnotationOptions()
+//            .withPoints(listOf(testPoints))
+//            .withFillColor(Color.RED)
+//            .withFillOpacity(0.2)
+//        testAnnotationMgr.create(polygonOptions)
+//
+//        testBorderAnnotationMgr.deleteAll()
+//        for (i in tileBounds.min.x until tileBounds.max.x) {
+//            for (j in tileBounds.min.y downTo tileBounds.max.y + 1) {
+//                val tile = MapTiling.MapTile(i, j)
+//                val maxTile = MapTiling.MapTile(i + 1, j - 1)
+//                val bounds = tileBoundsToCoordinateBounds(MapTiling.TileBounds(tile, maxTile))
+//                val points = listOf(bounds.northwest(), bounds.northeast, bounds.southeast(), bounds.southwest, bounds.northwest())
+//
+//                val polylineOptions = PolylineAnnotationOptions()
+//                    .withPoints(points)
+//                    .withLineWidth(10.0)
+//                    .withLineColor(Color.BLACK)
+//                testBorderAnnotationMgr.create(polylineOptions)
+//            }
+//        }
 
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val requestBody = "data=$encodedQuery"

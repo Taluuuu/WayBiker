@@ -3,6 +3,7 @@ package blue.eaudouce.waybiker.home
 import android.content.Context
 import android.graphics.Color
 import android.widget.FrameLayout
+import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.mapbox.geojson.Point
 import com.mapbox.maps.plugin.annotation.annotations
@@ -10,6 +11,7 @@ import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import io.github.jan.supabase.postgrest.from
 
 class MapAction_RecordTrack(
     private val waybikerMap: WaybikerMap,
@@ -59,7 +61,8 @@ class MapAction_RecordTrack(
                 waybikerMap.onLocationUpdated = null
             }
             RecordState.PostRecording -> {
-
+                val trackPointsTable = SupabaseInstance.client.from("track_points")
+//                trackPointsTable.upsert()
             }
         }
 

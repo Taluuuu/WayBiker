@@ -12,7 +12,7 @@ import kotlin.math.tan
 object MapTiling {
 
     // Determines how big tiles are
-    const val ZOOM_LEVEL = 15
+    const val ZOOM_LEVEL = 16
 
     // From https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
     fun longitudeToTileX(lon: Double): Int {
@@ -66,8 +66,8 @@ object MapTiling {
             pointToMapTile(maxBounds)
         )
 
-        tileBounds.min.y += 1
         tileBounds.max.x += 1
+        tileBounds.min.y += 1
 
         return tileBounds
     }
