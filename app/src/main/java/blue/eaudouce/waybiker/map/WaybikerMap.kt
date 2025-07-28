@@ -4,11 +4,11 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
 import android.location.Location
-import android.util.Log
 import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
+import blue.eaudouce.waybiker.util.MapTiling.forEachTile
 import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
 import com.google.gson.JsonObject
 import com.mapbox.geojson.Point
@@ -33,17 +33,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import okhttp3.Call
-import okhttp3.Callback
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import okhttp3.Response
 import org.json.JSONArray
-import org.json.JSONObject
-import java.io.IOException
-import java.net.URLEncoder
 import kotlin.math.cos
 import kotlin.math.sqrt
 
@@ -60,6 +50,8 @@ class WaybikerMap(
 
     private val testAnnotationMgr: PolygonAnnotationManager
     private val testBorderAnnotationMgr: PolylineAnnotationManager
+
+    private val mapGraph: MapGraph
 
     // Map graph data
     val graphLinks = ArrayList<StreetBit>()
@@ -105,6 +97,7 @@ class WaybikerMap(
 
         mapView.mapboxMap.subscribeMapIdle { if (pendingMapRefresh) refreshMap() }
         mapView.mapboxMap.subscribeCameraChanged { queueRefreshMap() }
+        mapGraph = MapGraph(mapView)
     }
 
     fun onLocationUpdated(location: Location) {
@@ -492,64 +485,77 @@ class WaybikerMap(
         pendingMapRefresh = false
         val coordBounds = mapView.mapboxMap.coordinateBoundsForCamera(mapView.mapboxMap.cameraState.toCameraOptions())
         val tileBounds = coordinateBoundsToTileBounds(coordBounds)
+
+        // Include neighbouring tiles
+        tileBounds.min.x -= 1
+        tileBounds.min.y += 1
+        tileBounds.max.x += 1
+        tileBounds.max.y -= 1
+
+        tileBounds.forEachTile { mapTile ->
+            if (!mapGraph.isTilePendingOrLoaded(mapTile)) {
+                mapGraph.queueTileLoad(mapTile)
+            }
+        }
+
         val finalBounds = tileBoundsToCoordinateBounds(tileBounds)
-
-        val query = String.format("""
-            [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
-            (
-              way["highway"~"^(trunk|primary|secondary|tertiary|unclassified|residential)"];
-            );
-            out body;
-            >;
-            out skel qt;
-        """, finalBounds.south(), finalBounds.west(), finalBounds.north(), finalBounds.east()).trimIndent()
-
-//        testAnnotationMgr.deleteAll()
-//        val testPoints = listOf(finalBounds.northwest(), finalBounds.northeast, finalBounds.southeast(), finalBounds.southwest, finalBounds.northwest())
-//        val polygonOptions = PolygonAnnotationOptions()
-//            .withPoints(listOf(testPoints))
-//            .withFillColor(Color.RED)
-//            .withFillOpacity(0.2)
-//        testAnnotationMgr.create(polygonOptions)
 //
-//        testBorderAnnotationMgr.deleteAll()
-//        for (i in tileBounds.min.x until tileBounds.max.x) {
-//            for (j in tileBounds.min.y downTo tileBounds.max.y + 1) {
-//                val tile = MapTiling.MapTile(i, j)
-//                val maxTile = MapTiling.MapTile(i + 1, j - 1)
-//                val bounds = tileBoundsToCoordinateBounds(MapTiling.TileBounds(tile, maxTile))
-//                val points = listOf(bounds.northwest(), bounds.northeast, bounds.southeast(), bounds.southwest, bounds.northwest())
+//        val query = String.format("""
+//            [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
+//            (
+//              way["highway"~"^(trunk|primary|secondary|tertiary|unclassified|residential)"];
+//            );
+//            out body;
+//            >;
+//            out skel qt;
+//        """, finalBounds.south(), finalBounds.west(), finalBounds.north(), finalBounds.east()).trimIndent()
+
+        testAnnotationMgr.deleteAll()
+        val testPoints = listOf(finalBounds.northwest(), finalBounds.northeast, finalBounds.southeast(), finalBounds.southwest, finalBounds.northwest())
+        val polygonOptions = PolygonAnnotationOptions()
+            .withPoints(listOf(testPoints))
+            .withFillColor(Color.RED)
+            .withFillOpacity(0.2)
+        testAnnotationMgr.create(polygonOptions)
+
+        testBorderAnnotationMgr.deleteAll()
+        for (i in tileBounds.min.x until tileBounds.max.x) {
+            for (j in tileBounds.min.y downTo tileBounds.max.y + 1) {
+                val tile = MapTiling.MapTile(i, j)
+                val maxTile = MapTiling.MapTile(i + 1, j - 1)
+                val bounds = tileBoundsToCoordinateBounds(MapTiling.TileBounds(tile, maxTile))
+                val points = listOf(bounds.northwest(), bounds.northeast, bounds.southeast(), bounds.southwest, bounds.northwest())
+
+                val polylineOptions = PolylineAnnotationOptions()
+                    .withPoints(points)
+                    .withLineWidth(10.0)
+                    .withLineColor(Color.BLACK)
+                testBorderAnnotationMgr.create(polylineOptions)
+            }
+        }
+
+//        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+//        val requestBody = "data=$encodedQuery"
+//            .toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
 //
-//                val polylineOptions = PolylineAnnotationOptions()
-//                    .withPoints(points)
-//                    .withLineWidth(10.0)
-//                    .withLineColor(Color.BLACK)
-//                testBorderAnnotationMgr.create(polylineOptions)
+//        val request = Request.Builder()
+//            .url("https://overpass-api.de/api/interpreter")
+//            .post(requestBody)
+//            .build()
+//
+//        val client = OkHttpClient()
+//        client.newCall(request).enqueue(object : Callback {
+//            override fun onFailure(call: Call, e: IOException) {
+//                Log.e("Overpass", "Request failed: ${e.message}")
 //            }
-//        }
-
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        val requestBody = "data=$encodedQuery"
-            .toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
-
-        val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
-            .post(requestBody)
-            .build()
-
-        val client = OkHttpClient()
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                Log.e("Overpass", "Request failed: ${e.message}")
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                val body = response.body?.string() ?: return
-                val json = JSONObject(body)
-                val elements = json.getJSONArray("elements")
-
-                makeMapGraph(elements)
-            }
-        })
+//
+//            override fun onResponse(call: Call, response: Response) {
+//                val body = response.body?.string() ?: return
+//                val json = JSONObject(body)
+//                val elements = json.getJSONArray("elements")
+//
+//                makeMapGraph(elements)
+//            }
+//        })
     }
 }

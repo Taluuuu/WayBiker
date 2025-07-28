@@ -43,6 +43,14 @@ object MapTiling {
         var max: MapTile
     )
 
+    fun TileBounds.forEachTile(function: (MapTile) -> Unit) {
+        for (i in min.x until max.x) {
+            for (j in min.y downTo max.y + 1) {
+                function(MapTile(i, j))
+            }
+        }
+    }
+
     fun pointToMapTile(point: Point): MapTile {
         return MapTile(
             longitudeToTileX(point.longitude()),
@@ -77,5 +85,11 @@ object MapTiling {
             mapTileToPoint(tileBounds.min),
             mapTileToPoint(tileBounds.max),
         )
+    }
+
+    fun MapTile.toCoordinateBounds(): CoordinateBounds {
+        val min = MapTile(x, y + 1)
+        val max = MapTile(x + 1, y)
+        return tileBoundsToCoordinateBounds(TileBounds(min, max))
     }
 }
