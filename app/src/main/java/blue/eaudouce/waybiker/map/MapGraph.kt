@@ -2,15 +2,14 @@ package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
 import android.graphics.Color
-import android.util.Log
 import blue.eaudouce.waybiker.util.MapTiling
+import blue.eaudouce.waybiker.util.MapTiling.pointToMapTile
 import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
 import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
-import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -79,14 +78,16 @@ class MapGraph(
 
     private val links = HashMap<LinkKey, LinkData>()
 
-    private val maxPendingTiles = 5
-    private var numPendingTiles = 0
-    private val tilesToLoad = ArrayDeque<MapTiling.MapTile>()
+    private val waitingOnStreetQuery get() = tilesCurrentlyLoading.isNotEmpty()
+    private val tilesToLoad = ArrayList<MapTiling.MapTile>()
+    private val tilesCurrentlyLoading = ArrayList<MapTiling.MapTile>()
 
 //    private val circleAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
     private val polylineAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
+
+    private val client = OkHttpClient.Builder().build()
 
     fun isTilePendingOrLoaded(tile: MapTiling.MapTile): Boolean {
         return tiles.contains(tile) || tilesToLoad.contains(tile)
@@ -158,78 +159,86 @@ class MapGraph(
         return null
     }
 
-    fun queueTileLoad(tile: MapTiling.MapTile) {
-        if (!tilesToLoad.contains(tile)) {
-            tilesToLoad.add(tile)
+    fun queueTileLoads(newTiles: List<MapTiling.MapTile>) {
+        for (tile in newTiles) {
+            if (!tilesToLoad.contains(tile) && !tilesCurrentlyLoading.contains(tile) && !tiles.contains(tile))
+                tilesToLoad.add(tile)
         }
 
-        loadNextTile()
-    }
-
-    private fun loadNextTile() {
-        if (numPendingTiles >= maxPendingTiles)
-            return
-
-        val tile = tilesToLoad.removeFirstOrNull()
-        if (tile != null)
-            loadTileImmediate(tile)
+        loadPendingTiles()
     }
 
     @SuppressLint("DefaultLocale")
-    private fun loadTileImmediate(tile: MapTiling.MapTile) {
+    private fun makeQueryText(tiles: List<MapTiling.MapTile>): String {
+        var ways = ""
+        for (tile in tiles) {
+            val bounds = tile.toCoordinateBounds()
+            ways += String.format("              way[\"highway\"~\"^(trunk|primary|secondary|tertiary|unclassified|residential)\"](%.4f,%.4f,%.4f,%.4f);\n",
+                bounds.south(), bounds.west(), bounds.north(), bounds.east())
+        }
 
-        // Reload tile
-        if (isTilePendingOrLoaded(tile))
-            removeTile(tile)
-
-        val bounds = tile.toCoordinateBounds()
-
-        val query = String.format("""
-            [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
+        return String.format("""
+            [out:json][timeout:25];
             (
-              way["highway"~"^(trunk|primary|secondary|tertiary|unclassified|residential)"];
+%s
             );
-            out body;
+            out skel center;
             >;
             out skel qt;
-        """, bounds.south(), bounds.west(), bounds.north(), bounds.east()).trimIndent()
+        """, ways).trimIndent()
+    }
+
+    @SuppressLint("DefaultLocale")
+    fun loadPendingTiles() {
+
+        if (tilesToLoad.isEmpty())
+            return
+
+        for (tile in tilesToLoad)
+            removeTile(tile)
+
+        val query = makeQueryText(tilesToLoad)
 
         val encodedQuery = URLEncoder.encode(query, "UTF-8")
         val requestBody = "data=$encodedQuery"
             .toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
-
-        numPendingTiles++
 
         val request = Request.Builder()
             .url("https://overpass-api.de/api/interpreter")
             .post(requestBody)
             .build()
 
-        lifecycleScope.launch {
-            val elements = withContext(Dispatchers.IO) {
-                try {
-                    val response = OkHttpClient().newCall(request).execute()
-                    val body = response.body!!.string()
-                    val json = JSONObject(body)
-                    json.getJSONArray("elements")
-                } catch (e: Exception) {
+        tilesCurrentlyLoading.addAll(tilesToLoad)
+        tilesToLoad.clear()
+
+        client.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                lifecycleScope.launch {
+                    tilesCurrentlyLoading.clear()
                     e.printStackTrace()
-                    null
                 }
             }
 
-            numPendingTiles--
+            override fun onResponse(call: Call, response: Response) {
+                lifecycleScope.launch {
+                    val queriedTiles = tilesCurrentlyLoading.toMutableList()
+                    tilesCurrentlyLoading.clear()
+                    try {
+                        val elements = withContext(Dispatchers.IO) {
+                            val body = response.body?.string() ?: ""
+                            val json = JSONObject(body)
+                            json.getJSONArray("elements")
+                        }
 
-            if (elements != null) {
-                try {
-                    onReceivedTile(elements, tile)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    tiles.remove(tile)
-                    queueTileLoad(tile)
+                        onReceivedTiles(elements, queriedTiles)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+
+                    response.close()
                 }
             }
-        }
+        })
     }
 
     private fun getNextIntersection(startId: Long, adjId: Long): Long? {
@@ -292,6 +301,8 @@ class MapGraph(
                         val points = ArrayList<Point>()
                         points.add(node.position)
 
+                        // Traverse from this node to the nearest intersection in the direction of
+                        // adjacentNodeId
                         while (true) {
                             val cur = nodes[curId]!!
 
@@ -372,15 +383,12 @@ class MapGraph(
         }
     }
 
-    private fun onReceivedTile(elements: JSONArray, mapTile: MapTiling.MapTile) {
-        var tile = tiles[mapTile]
-        if (tile != null)
-            return
-
-        tile = TileData()
-        tiles[mapTile] = tile
-
+    private fun onReceivedTiles(elements: JSONArray, queriedTiles: List<MapTiling.MapTile>) {
         val nodePositions = HashMap<Long, Point>()
+
+        for (mapTile in queriedTiles) {
+            tiles[mapTile] = TileData()
+        }
 
         // Set node positions
         for (i in 0 until elements.length()) {
@@ -407,7 +415,14 @@ class MapGraph(
                     continue
 
                 val wayId = element.getLong("id")
-                tile.ways.add(wayId)
+                val wayCenterObject = element.getJSONObject("center")
+                val wayCenter = Point.fromLngLat(
+                    wayCenterObject.getDouble("lon"),
+                    wayCenterObject.getDouble("lat")
+                )
+
+                val mapTile = pointToMapTile(wayCenter)
+                tiles[mapTile]?.ways?.add(wayId)
 
                 var way = ways[wayId]
                 if (way != null) {
@@ -470,7 +485,9 @@ class MapGraph(
 ////            }
 //        }
 
-        drawStreets(mapTile)
-        loadNextTile()
+        for (mapTile in queriedTiles)
+            drawStreets(mapTile)
+
+        loadPendingTiles()
     }
 }

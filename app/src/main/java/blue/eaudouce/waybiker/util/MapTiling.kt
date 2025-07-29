@@ -75,21 +75,28 @@ object MapTiling {
         )
 
         tileBounds.max.x += 1
-        tileBounds.min.y += 1
+        tileBounds.max.y -= 1
 
         return tileBounds
     }
 
-    fun tileBoundsToCoordinateBounds(tileBounds: TileBounds): CoordinateBounds {
-        return CoordinateBounds(
-            mapTileToPoint(tileBounds.min),
-            mapTileToPoint(tileBounds.max),
-        )
-    }
+//    fun tileBoundsToCoordinateBounds(tileBounds: TileBounds): CoordinateBounds {
+//        val southwest = mapTileToPoint(
+//            TileBounds(
+//                MapTile(tileBounds.min.x),
+//                MapTile()
+//            )
+//        )
+//        return CoordinateBounds(
+//            mapTileToPoint(tileBounds.min),
+//            mapTileToPoint(tileBounds.max),
+//        )
+//    }
 
     fun MapTile.toCoordinateBounds(): CoordinateBounds {
-        val min = MapTile(x, y + 1)
-        val max = MapTile(x + 1, y)
-        return tileBoundsToCoordinateBounds(TileBounds(min, max))
+        val southwest = mapTileToPoint(MapTile(x, y + 1))
+        val northeast = mapTileToPoint(MapTile(x + 1, y))
+
+        return CoordinateBounds(southwest, northeast)
     }
 }

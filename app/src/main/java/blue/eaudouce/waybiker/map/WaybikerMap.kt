@@ -9,7 +9,7 @@ import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.coordinateBoundsToTileBounds
 import blue.eaudouce.waybiker.util.MapTiling.forEachTile
-import blue.eaudouce.waybiker.util.MapTiling.tileBoundsToCoordinateBounds
+import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
 import com.google.gson.JsonObject
 import com.mapbox.geojson.Point
 import com.mapbox.maps.CameraOptions
@@ -492,13 +492,17 @@ class WaybikerMap(
         tileBounds.max.x += 1
         tileBounds.max.y -= 1
 
-        tileBounds.forEachTile { mapTile ->
-            if (!mapGraph.isTilePendingOrLoaded(mapTile)) {
-                mapGraph.queueTileLoad(mapTile)
-            }
-        }
+//        tileBounds.min.x = 19372
+//        tileBounds.max.x = 19373
+//        tileBounds.min.y = 23447
+//        tileBounds.max.y = 23446
 
-        val finalBounds = tileBoundsToCoordinateBounds(tileBounds)
+//        var test = false
+        val tilesToLoad = ArrayList<MapTiling.MapTile>()
+        tileBounds.forEachTile { tilesToLoad.add(it) }
+        mapGraph.queueTileLoads(tilesToLoad)
+
+//        val finalBounds = tileBoundsToCoordinateBounds(tileBounds)
 //
 //        val query = String.format("""
 //            [out:json][timeout:25][bbox:%.4f,%.4f,%.4f,%.4f];
@@ -516,8 +520,7 @@ class WaybikerMap(
             for (j in tileBounds.min.y downTo tileBounds.max.y + 1) {
                 val tile = MapTiling.MapTile(i, j)
 
-                val maxTile = MapTiling.MapTile(i + 1, j - 1)
-                val bounds = tileBoundsToCoordinateBounds(MapTiling.TileBounds(tile, maxTile))
+                val bounds = tile.toCoordinateBounds()
                 val points = listOf(bounds.northwest(), bounds.northeast, bounds.southeast(), bounds.southwest, bounds.northwest())
 
                 val polygonOptions = PolygonAnnotationOptions()
