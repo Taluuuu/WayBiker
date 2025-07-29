@@ -511,20 +511,20 @@ class WaybikerMap(
 //        """, finalBounds.south(), finalBounds.west(), finalBounds.north(), finalBounds.east()).trimIndent()
 
         testAnnotationMgr.deleteAll()
-        val testPoints = listOf(finalBounds.northwest(), finalBounds.northeast, finalBounds.southeast(), finalBounds.southwest, finalBounds.northwest())
-        val polygonOptions = PolygonAnnotationOptions()
-            .withPoints(listOf(testPoints))
-            .withFillColor(Color.RED)
-            .withFillOpacity(0.2)
-        testAnnotationMgr.create(polygonOptions)
-
         testBorderAnnotationMgr.deleteAll()
         for (i in tileBounds.min.x until tileBounds.max.x) {
             for (j in tileBounds.min.y downTo tileBounds.max.y + 1) {
                 val tile = MapTiling.MapTile(i, j)
+
                 val maxTile = MapTiling.MapTile(i + 1, j - 1)
                 val bounds = tileBoundsToCoordinateBounds(MapTiling.TileBounds(tile, maxTile))
                 val points = listOf(bounds.northwest(), bounds.northeast, bounds.southeast(), bounds.southwest, bounds.northwest())
+
+                val polygonOptions = PolygonAnnotationOptions()
+                    .withPoints(listOf(points))
+                    .withFillColor(if (mapGraph.areNeighbourTilesLoaded(tile)) Color.GREEN else Color.RED)
+                    .withFillOpacity(0.2)
+                testAnnotationMgr.create(polygonOptions)
 
                 val polylineOptions = PolylineAnnotationOptions()
                     .withPoints(points)
