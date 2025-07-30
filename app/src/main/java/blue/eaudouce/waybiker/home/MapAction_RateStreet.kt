@@ -157,7 +157,7 @@ class MapAction_RateStreet(
                                 }
                             }
 
-                            waybikerMap.queueRefreshMap()
+                            waybikerMap.refreshMap()
                             finishAction()
                         }
 
