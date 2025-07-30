@@ -2,8 +2,8 @@ package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
 import android.graphics.Color
+import blue.eaudouce.waybiker.StreetRating
 import blue.eaudouce.waybiker.SupabaseInstance
-import blue.eaudouce.waybiker.map.WaybikerMap.StreetRating
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.pointToMapTile
 import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
@@ -490,6 +490,10 @@ class MapGraph(mapView: MapView) {
                 }
             }
         }
+    }
+
+    fun isNodeIntersection(nodeId: Long): Boolean {
+        return nodes[nodeId]?.isIntersection ?: false
     }
 
     private fun onReceivedTiles(elements: JSONArray, ratings: List<StreetRating>, queriedTiles: MutableList<MapTiling.MapTile>) {

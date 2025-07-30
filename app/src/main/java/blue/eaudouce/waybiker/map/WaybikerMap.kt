@@ -52,16 +52,6 @@ class WaybikerMap(
     var onLocationUpdated: ((Point) -> (Unit))? = null
     private var isFirstLocationUpdate = true
 
-    @Serializable
-    data class StreetRating(
-        val start: Long,
-        val end: Long,
-        val rating: Short,
-        val user_id: String,
-        val tile_x: Int,
-        val tile_y: Int
-    )
-
     init {
 //        streetAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
         locationAnnotationMgr = mapView.annotations.createCircleAnnotationManager()

@@ -4,6 +4,8 @@ import android.content.Context
 import android.widget.FrameLayout
 import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.Track
+import blue.eaudouce.waybiker.TrackPoint
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.mapbox.geojson.Point
 import com.mapbox.maps.plugin.annotation.annotations
@@ -11,7 +13,13 @@ import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class MapAction_RecordTrack(
     private val waybikerMap: WaybikerMap,
@@ -34,6 +42,8 @@ class MapAction_RecordTrack(
     private var recordedPathAnnotation: PolylineAnnotation? = null
     private val lineAnnotationMgr: PolylineAnnotationManager = waybikerMap.mapView.annotations.createPolylineAnnotationManager()
 
+    private val lifecycleScope = CoroutineScope(Dispatchers.Main)
+
     private fun setState(newState: RecordState) {
         if (currentState == newState)
             return
@@ -50,8 +60,7 @@ class MapAction_RecordTrack(
                 waybikerMap.onLocationUpdated = null
             }
             RecordState.PostRecording -> {
-                val trackPointsTable = SupabaseInstance.client.from("track_points")
-//                trackPointsTable.upsert()
+
             }
         }
 
@@ -89,7 +98,58 @@ class MapAction_RecordTrack(
                     "Save this track?",
                     "You will be notified if there is a change in the condition of this track.",
                     { finishAction() },
-                    { finishAction() }
+                    {
+                        lifecycleScope.launch {
+                            // Trim all points that are not intersections, apart from the first and last ones.
+                            val finalPoints = ArrayList<TrackPoint>()
+                            val trackId = UUID.randomUUID()
+                            var pointIndex = 0
+                            for (i in 0 until recordedPathNodes.size) {
+                                val nodeId = recordedPathNodes[i]
+
+                                if (i == 0 || i == recordedPathNodes.size - 1) {
+                                    finalPoints.add(
+                                        TrackPoint(
+                                            trackId.toString(),
+                                            pointIndex++,
+                                            nodeId
+                                        )
+                                    )
+                                    continue
+                                }
+
+                                if (waybikerMap.mapGraph.isNodeIntersection(nodeId)) {
+                                    finalPoints.add(
+                                        TrackPoint(
+                                            trackId.toString(),
+                                            pointIndex++,
+                                            nodeId
+                                        )
+                                    )
+                                }
+                            }
+
+                            val track = Track(
+                                trackId.toString(),
+                                "test",
+                                SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
+                            )
+
+                            withContext(Dispatchers.IO) {
+                                try {
+                                    val tracksTable = SupabaseInstance.client.from("tracks")
+                                    tracksTable.upsert(track)
+
+                                    val trackPointsTable = SupabaseInstance.client.from("track_points")
+                                    for (point in finalPoints) {
+                                        trackPointsTable.upsert(point)
+                                    }
+                                } finally {}
+                            }
+
+                            finishAction()
+                        }
+                    }
                 )
             }
         }

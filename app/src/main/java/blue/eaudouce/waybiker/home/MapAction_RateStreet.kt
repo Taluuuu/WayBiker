@@ -6,6 +6,7 @@ import android.widget.RatingBar
 import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.R
+import blue.eaudouce.waybiker.StreetRating
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.MapGraph
 import blue.eaudouce.waybiker.map.StreetBit
@@ -140,7 +141,7 @@ class MapAction_RateStreet(
                                             val linkTile = waybikerMap.mapGraph.getLinkTile(linkKey)
 
                                             if (linkTile != null) {
-                                                val rating = WaybikerMap.StreetRating(
+                                                val rating = StreetRating(
                                                     start = linkKey.first,
                                                     end = linkKey.second,
                                                     rating = ratingBar.rating.roundToInt().toShort(),
