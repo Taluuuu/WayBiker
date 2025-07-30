@@ -7,6 +7,7 @@ import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.map.MapGraph
 import blue.eaudouce.waybiker.map.StreetBit
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.google.gson.JsonObject
@@ -43,7 +44,7 @@ class MapAction_RateStreet(
     private val circleAnnotationMgr: CircleAnnotationManager = waybikerMap.mapView.annotations.createCircleAnnotationManager()
 
     private val selectedStreets = ArrayDeque<Long>()
-    private val selectionAnnotations = HashMap<Pair<Long, Long>, PolylineAnnotation>()
+    private val selectionAnnotations = HashMap<MapGraph.LinkKey, PolylineAnnotation>()
     private var dialogView: MapDialogView? = null
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
@@ -65,7 +66,7 @@ class MapAction_RateStreet(
         when (currentState) {
             RatingState.Inactive -> {}
             RatingState.TapStreet -> {
-                waybikerMap.onClickedStreet = null
+                waybikerMap.mapGraph.onClickedLink = null
             }
             RatingState.DefineStreetLength -> {
                 destroyHandles()
@@ -94,11 +95,10 @@ class MapAction_RateStreet(
                     null
                 )
 
-                waybikerMap.onClickedStreet = { clickedStreet: StreetBit ->
-                    val clickedStreetEnds = clickedStreet.getEnds()
-                    selectedStreets.add(clickedStreetEnds.first)
-                    selectedStreets.add(clickedStreetEnds.second)
-                    highlightStreet(clickedStreet)
+                waybikerMap.mapGraph.onClickedLink = { link: MapGraph.LinkKey ->
+                    selectedStreets.add(link.first)
+                    selectedStreets.add(link.second)
+                    highlightStreet(link)
 
                     setState(RatingState.DefineStreetLength)
                 }
@@ -136,14 +136,21 @@ class MapAction_RateStreet(
                                     selectedStreets
                                         .zipWithNext()
                                         .forEach { ends ->
-                                            val (from, to) = sortEnds(ends)
-                                            val rating = WaybikerMap.StreetRating(
-                                                start = from,
-                                                end = to,
-                                                rating = ratingBar.rating.roundToInt().toShort(),
-                                                user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
-                                            )
-                                            ratingsTable.upsert(rating)
+                                            val linkKey = MapGraph.LinkKey.of(ends.first, ends.second)
+                                            val linkTile = waybikerMap.mapGraph.getLinkTile(linkKey)
+
+                                            if (linkTile != null) {
+                                                val rating = WaybikerMap.StreetRating(
+                                                    start = linkKey.first,
+                                                    end = linkKey.second,
+                                                    rating = ratingBar.rating.roundToInt().toShort(),
+                                                    user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: "",
+                                                    tile_x = linkTile.x,
+                                                    tile_y = linkTile.y,
+                                                )
+
+                                                ratingsTable.upsert(rating)
+                                            }
                                         }
                                 } catch (e: Exception) {
                                     // TODO: Show error
@@ -170,16 +177,9 @@ class MapAction_RateStreet(
         return if (handleIndex == 0) selectedStreets.first() else selectedStreets.last()
     }
 
-    private fun sortEnds(ends: Pair<Long, Long>): Pair<Long, Long> {
-        return if (ends.first < ends.second)
-            Pair(ends.first, ends.second) else
-            Pair(ends.second, ends.first)
-    }
-
-    private fun highlightStreet(streetBit: StreetBit) {
-        val nodePositions = streetBit.nodeIds.mapNotNull {
-            nodeId -> waybikerMap.nodePositions[nodeId]
-        }
+    private fun highlightStreet(link: MapGraph.LinkKey) {
+        val streetNodeIds = waybikerMap.mapGraph.getLinkNodeIds(link) ?: return
+        val nodePositions = streetNodeIds.mapNotNull { waybikerMap.mapGraph.getNodePosition(it) }
 
         val annotationOptions = PolylineAnnotationOptions()
             .withPoints(nodePositions)
@@ -187,12 +187,12 @@ class MapAction_RateStreet(
             .withLineColor("#439c32")
         val annotation = lineAnnotationMgr.create(annotationOptions)
 
-        selectionAnnotations[sortEnds(streetBit.getEnds())] = annotation
+        selectionAnnotations[link] = annotation
     }
 
 
-    private fun unhighlightStreet(ends: Pair<Long, Long>) {
-        val annotation = selectionAnnotations.remove(sortEnds(ends))
+    private fun unhighlightStreet(linkKey: MapGraph.LinkKey) {
+        val annotation = selectionAnnotations.remove(linkKey)
         if (annotation != null)
             lineAnnotationMgr.delete(annotation)
     }
@@ -203,14 +203,16 @@ class MapAction_RateStreet(
     }
 
     private fun createHandle(handleIndex: Int) {
-        val handlePosition = if (handleIndex == 0)
+        val handleNodeId = if (handleIndex == 0)
             selectedStreets.first() else selectedStreets.last()
+
+        val handlePosition = waybikerMap.mapGraph.getNodePosition(handleNodeId) ?: return
 
         val jsonElement = JsonObject()
         jsonElement.addProperty("handleIndex", handleIndex)
 
         val firstHandleAnnotationOptions = CircleAnnotationOptions()
-            .withPoint(waybikerMap.getNodePosition(handlePosition))
+            .withPoint(handlePosition)
             .withCircleRadius(20.0)
             .withCircleColor("#4eee8b")
             .withDraggable(true)
@@ -231,12 +233,12 @@ class MapAction_RateStreet(
         val currentIntersection = getHandleIntersection(handleIndex) ?: return
 
         // Find the new intersection for this handle
-        val usableIntersections = waybikerMap.getConnectedIntersections(currentIntersection)
+        val usableIntersections = ArrayList(waybikerMap.mapGraph.getLinkedIntersectionIds(currentIntersection))
         usableIntersections.add(currentIntersection)
-        val nearestNodeId = waybikerMap.findNearestIntersectionToPoint(circleAnnotation.point, usableIntersections)
+        val nearestNodeId = waybikerMap.mapGraph.findNearestNodeIdToPoint(circleAnnotation.point, usableIntersections)
 
         // Move the handle to this intersection
-        circleAnnotation.point = waybikerMap.getNodePosition(nearestNodeId)
+        circleAnnotation.point = waybikerMap.mapGraph.getNodePosition(nearestNodeId) ?: return
         circleAnnotationMgr.update(circleAnnotation)
 
         if (nearestNodeId == currentIntersection) {
@@ -249,7 +251,7 @@ class MapAction_RateStreet(
             val prevNodeIndex = selectedStreets.indexOfFirst { nodeId -> nodeId == nearestNodeId }
             if (prevNodeIndex != -1) {
                 for (i in 0 until prevNodeIndex) {
-                    unhighlightStreet(Pair(selectedStreets[0], selectedStreets[1]))
+                    unhighlightStreet(MapGraph.LinkKey.of(selectedStreets[0], selectedStreets[1]))
                     selectedStreets.removeFirst()
                     hasRemovedNodes = true
                 }
@@ -258,7 +260,7 @@ class MapAction_RateStreet(
             val prevNodeIndex = selectedStreets.indexOfLast { nodeId -> nodeId == nearestNodeId }
             if (prevNodeIndex != -1) {
                 for (i in selectedStreets.size - 1 downTo prevNodeIndex + 1) {
-                    unhighlightStreet(Pair(selectedStreets[i], selectedStreets[i - 1]))
+                    unhighlightStreet(MapGraph.LinkKey.of(selectedStreets[i], selectedStreets[i - 1]))
                     selectedStreets.removeLast()
                     hasRemovedNodes = true
                 }
@@ -269,8 +271,7 @@ class MapAction_RateStreet(
             return
         }
 
-        val streetBit = waybikerMap.findLinkBetween(currentIntersection, nearestNodeId) ?: return
-        highlightStreet(streetBit)
+        highlightStreet(MapGraph.LinkKey.of(currentIntersection, nearestNodeId))
 
         if (handleIndex == 0) {
             selectedStreets.addFirst(nearestNodeId)

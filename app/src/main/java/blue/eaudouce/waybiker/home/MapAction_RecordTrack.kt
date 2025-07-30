@@ -118,27 +118,27 @@ class MapAction_RecordTrack(
     }
 
     private fun onLocationUpdated(location: Point) {
-        var nearestPointId = -1L
-        var minDistance = Double.MAX_VALUE
-        for (link in waybikerMap.graphLinks) {
-            for (pointId in link.nodeIds) {
-                val point = waybikerMap.getNodePosition(pointId)
-                val dist = waybikerMap.calcPointDistanceSqr(location, point)
-                if (dist < minDistance) {
-                    minDistance = dist
-                    nearestPointId = pointId
-                }
-            }
-        }
-
-        if (recordedPathNodes.isNotEmpty() && recordedPathNodes.last() == nearestPointId) {
-            return
-        }
-
-        // We have reached a new point.
-        recordedPathNodes.add(nearestPointId)
-        recordedPathPoints.add(waybikerMap.getNodePosition(nearestPointId))
-
-        lineAnnotationMgr.update(recordedPathAnnotation)
+//        var nearestPointId = -1L
+//        var minDistance = Double.MAX_VALUE
+//        for (link in waybikerMap.graphLinks) {
+//            for (pointId in link.nodeIds) {
+//                val point = waybikerMap.getNodePosition(pointId)
+//                val dist = waybikerMap.calcPointDistanceSqr(location, point)
+//                if (dist < minDistance) {
+//                    minDistance = dist
+//                    nearestPointId = pointId
+//                }
+//            }
+//        }
+//
+//        if (recordedPathNodes.isNotEmpty() && recordedPathNodes.last() == nearestPointId) {
+//            return
+//        }
+//
+//        // We have reached a new point.
+//        recordedPathNodes.add(nearestPointId)
+//        recordedPathPoints.add(waybikerMap.getNodePosition(nearestPointId))
+//
+//        lineAnnotationMgr.update(recordedPathAnnotation)
     }
 }

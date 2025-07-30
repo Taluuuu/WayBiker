@@ -2,15 +2,19 @@ package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
 import android.graphics.Color
+import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.map.WaybikerMap.StreetRating
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.pointToMapTile
 import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
+import com.google.gson.JsonObject
 import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -26,11 +30,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.URLEncoder
+import kotlin.invoke
+import kotlin.math.cos
+import kotlin.math.sqrt
 
-class MapGraph(
-    private val mapView: MapView
-) {
-
+class MapGraph(mapView: MapView) {
     @ConsistentCopyVisibility
     data class LinkKey private constructor(val first: Long, val second: Long) {
         companion object {
@@ -38,21 +42,25 @@ class MapGraph(
                 return if (a <= b) LinkKey(a, b) else LinkKey(b, a)
             }
         }
+
+        fun linksNode(nodeId: Long): Boolean {
+            return first == nodeId || second == nodeId
+        }
     }
 
     private class TileData {
-        // All IDs of ways within this tile
-        val ways = HashSet<Long>()
+        // All IDs of ways owned by this tile
+        val ways = ArrayList<Long>()
 
         // Stored to make sure links are deleted once the tile is deleted.
         val links = ArrayList<LinkKey>()
+
+        val ratings = HashMap<LinkKey, Short>()
     }
 
     private data class WayData(
         // All IDs of nodes within this way
         val nodes: ArrayList<Long>,
-        // The number of individual loaded tiles with this way
-        var referenceCount: Int,
     )
 
     private data class NodeData(
@@ -74,20 +82,31 @@ class MapGraph(
 
     private data class LinkData(
         val annotation: PolylineAnnotation,
+        val nodeIds: List<Long>,
+        var rating: Short
     )
 
     private val links = HashMap<LinkKey, LinkData>()
 
-    private val waitingOnStreetQuery get() = tilesCurrentlyLoading.isNotEmpty()
     private val tilesToLoad = ArrayList<MapTiling.MapTile>()
     private val tilesCurrentlyLoading = ArrayList<MapTiling.MapTile>()
+    private val linkAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
-//    private val circleAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
-    private val polylineAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
+    var onClickedLink: ((LinkKey) -> Unit)? = null
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
 
     private val client = OkHttpClient.Builder().build()
+
+    init {
+        linkAnnotationMgr.addClickListener { annotation ->
+            val data = annotation.getData() as JsonObject
+            val p0 = data.get("p0").asLong
+            val p1 = data.get("p1").asLong
+            onClickedLink?.invoke(LinkKey.of(p0, p1))
+            false
+        }
+    }
 
     fun isTilePendingOrLoaded(tile: MapTiling.MapTile): Boolean {
         return tiles.contains(tile) || tilesToLoad.contains(tile)
@@ -105,6 +124,33 @@ class MapGraph(
         }
     }
 
+    private fun calcPointDistanceSqr(p1: Point, p2: Point): Double {
+        // From ChatGPT
+        val w1 = Math.toRadians(p1.latitude())
+        val w2 = Math.toRadians(p2.latitude())
+        val dw = w2 - w1
+        val dl = Math.toRadians(p2.longitude() - p1.longitude())
+        val R = 6371000.0  // Earth's radius in meters
+        val x = dl * cos((w1 + w2) / 2)
+        val y = dw
+        return sqrt(x * x + y * y) * R
+    }
+
+    fun findNearestNodeIdToPoint(point: Point, nodeIds: List<Long>): Long {
+        var minDistance = Double.MAX_VALUE
+        var nearestNodeId = 0L
+        for (nodeId in nodeIds) {
+            val nodePoint = getNodePosition(nodeId) ?: continue
+            val distance = calcPointDistanceSqr(point, nodePoint)
+            if (distance < minDistance) {
+                minDistance = distance
+                nearestNodeId = nodeId
+            }
+        }
+
+        return nearestNodeId
+    }
+
     private fun removeTile(tile: MapTiling.MapTile) {
         val tileData = tiles.remove(tile)
         if (tileData == null)
@@ -112,12 +158,14 @@ class MapGraph(
 
         for (wayId in tileData.ways)
             removeWay(wayId)
+
+        // TODO
+//        for (linkId in tileData.links)
+//            removeLink(linkId)
     }
 
     private fun removeWay(wayId: Long) {
-        val way = ways[wayId]!!
-        if (--way.referenceCount > 0)
-            return
+        val way = ways[wayId] ?: return
 
         // No more tiles refer to this way, it can be deleted.
         ways.remove(wayId)
@@ -140,6 +188,19 @@ class MapGraph(
             nodes[adjNodeId]!!.adjacentNodes.remove(nodeId)
     }
 
+    fun getLinkNodeIds(linkKey: LinkKey): List<Long>? {
+        return links[linkKey]?.nodeIds
+    }
+
+    fun getLinkTile(linkKey: LinkKey): MapTiling.MapTile? {
+        val nodePos = getNodePosition(linkKey.first) ?: return null
+        return pointToMapTile(nodePos)
+    }
+
+    fun getNodePosition(nodeId: Long): Point? {
+        return nodes[nodeId]?.position
+    }
+
     // Returns all nodes linking the two inputs, including them.
     fun findLinkBetween(node0: Long, node1: Long): ArrayList<Long>? {
 //        val adjacentNodes = nodes[node0] ?: return null
@@ -157,6 +218,16 @@ class MapGraph(
 //        }
 
         return null
+    }
+
+    fun getLinkedIntersectionIds(nodeId: Long): List<Long> {
+        return links.keys.mapNotNull {
+            when (nodeId) {
+                it.first -> it.second
+                it.second -> it.first
+                else -> null
+            }
+        }
     }
 
     fun queueTileLoads(newTiles: List<MapTiling.MapTile>) {
@@ -222,7 +293,6 @@ class MapGraph(
             override fun onResponse(call: Call, response: Response) {
                 lifecycleScope.launch {
                     val queriedTiles = tilesCurrentlyLoading.toMutableList()
-                    tilesCurrentlyLoading.clear()
                     try {
                         val elements = withContext(Dispatchers.IO) {
                             val body = response.body?.string() ?: ""
@@ -230,7 +300,27 @@ class MapGraph(
                             json.getJSONArray("elements")
                         }
 
-                        onReceivedTiles(elements, queriedTiles)
+                        // Get all ratings in one of the queried tiles
+                        val ratings = withContext(Dispatchers.IO) {
+                            SupabaseInstance.client
+                                .from("street_ratings")
+                                .select {
+                                    filter {
+                                        or {
+                                            queriedTiles.forEach { (x, y) ->
+                                                and {
+                                                    eq("tile_x", x)
+                                                    eq("tile_y", y)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                .decodeList<StreetRating>()
+                        }
+
+                        onReceivedTiles(elements, ratings, queriedTiles)
+                        tilesCurrentlyLoading.clear()
                     } catch (e: Exception) {
                         e.printStackTrace()
                     }
@@ -266,6 +356,44 @@ class MapGraph(
         return true
     }
 
+    private fun calcStreetColor(rating: Short?): String {
+        if (rating == null)
+            return "#9c9c9c"
+
+        val streetColorValues = arrayListOf(
+            Pair(0.0f, Color.RED),
+            Pair(0.5f, Color.YELLOW),
+            Pair(1.0f, Color.GREEN)
+        )
+
+        val alpha = rating / 5.0f // TODO: Magic number bad
+        val colorRange = streetColorValues
+            .zipWithNext()
+            .find { (minColor, maxColor) ->
+                alpha >= minColor.first && alpha <= maxColor.first
+            } ?: return "#9c9c9c"
+
+        val (range0, range1) = colorRange
+        val (a0, c0) = range0
+        val (a1, c1) = range1
+
+        val withinRangeAlpha = (alpha - a0) / (a1 - a0)
+
+        val r0 = Color.red(c0)
+        val g0 = Color.green(c0)
+        val b0 = Color.blue(c0)
+
+        val r1 = Color.red(c1)
+        val g1 = Color.green(c1)
+        val b1 = Color.blue(c1)
+
+        val finalRed = (r0 + (r1 - r0) * withinRangeAlpha) / 255.0f
+        val finalGreen = (g0 + (g1 - g0) * withinRangeAlpha) / 255.0f
+        val finalBlue = (b0 + (b1 - b0) * withinRangeAlpha) / 255.0f
+
+        return String.format("#%06X", 0xFFFFFF and Color.rgb(finalRed, finalGreen, finalBlue))
+    }
+
     fun drawStreets(centerTile: MapTiling.MapTile) {
         for (i in centerTile.x - 1..centerTile.x + 1) {
             for (j in centerTile.y - 1..centerTile.y + 1) {
@@ -273,11 +401,11 @@ class MapGraph(
                 if (!areNeighbourTilesLoaded(mapTile))
                     continue
 
-                // Get tile nodes
                 val tile = tiles[mapTile]
                 if (tile == null || tile.links.isNotEmpty())
                     continue
 
+                // Get all nodes in the tile that are intersections
                 val intersectionNodeIds = ArrayList<Long>()
                 for (wayId in tile.ways) {
                     val way = ways[wayId]
@@ -292,35 +420,46 @@ class MapGraph(
                 }
 
                 for (nodeId in intersectionNodeIds) {
-                    val node = nodes[nodeId]!!
+                    val node = nodes[nodeId]
+                    if (node == null)
+                        continue
 
                     for (adjacentNodeId in node.adjacentNodes) {
                         var prevId = nodeId
                         var curId = adjacentNodeId
 
-                        val points = ArrayList<Point>()
-                        points.add(node.position)
+                        val linkNodeIds = ArrayList<Long>()
+                        linkNodeIds.add(nodeId)
 
                         // Traverse from this node to the nearest intersection in the direction of
                         // adjacentNodeId
                         while (true) {
                             val cur = nodes[curId]!!
 
-                            points.add(cur.position)
+                            linkNodeIds.add(curId)
 
                             if (cur.isIntersection) {
                                 val linkKey = LinkKey.of(nodeId, curId)
-                                if (MapTiling.pointToMapTile(nodes[linkKey.first]!!.position) != mapTile)
+                                if (pointToMapTile(nodes[linkKey.first]!!.position) != mapTile)
                                     break
 
+                                val rating = tile.ratings[linkKey]
+
+                                val points = linkNodeIds.mapNotNull { nodes[it]?.position }
+
                                 if (!links.contains(linkKey)) {
+                                    val jsonElement = JsonObject()
+                                    jsonElement.addProperty("p0", linkKey.first)
+                                    jsonElement.addProperty("p1", linkKey.second)
+
                                     val options = PolylineAnnotationOptions()
                                         .withPoints(points)
                                         .withLineWidth(10.0)
-                                        .withLineColor(Color.GREEN)
+                                        .withLineColor(calcStreetColor(rating))
                                         .withLineOpacity(0.5)
+                                        .withData(jsonElement)
 
-                                    links[linkKey] = LinkData(polylineAnnotationMgr.create(options))
+                                    links[linkKey] = LinkData(linkAnnotationMgr.create(options), linkNodeIds, 0)
                                     tile.links.add(linkKey)
                                 }
 
@@ -333,60 +472,17 @@ class MapGraph(
                         }
                     }
                 }
-
-//                // TODO: Nodes that are temporarily not intersections will still pass this.
-//                //       Need to make sure this only runs if all neighbouring tiles are loaded.
-//                val intersectionNodeIds = nodePositions.keys.filter {
-//                    val node = nodes[it]
-//                    return@filter node != null && node.isIntersection
-//                }
-//
-//                for (nodeId in intersectionNodeIds) {
-//                    val node = nodes[nodeId]!!
-//
-//                    for (adjacentNodeId in node.adjacentNodes) {
-//                        var prevId = nodeId
-//                        var curId = adjacentNodeId
-//
-//                        val points = ArrayList<Point>()
-//                        points.add(node.position)
-//
-//                        while (true) {
-//                            val cur = nodes[curId]!!
-//
-//                            points.add(cur.position)
-//
-//                            if (cur.isIntersection) {
-//                                val linkKey = LinkKey.of(nodeId, curId)
-//                                if (MapTiling.pointToMapTile(nodes[linkKey.first]!!.position) != mapTile)
-//                                    break
-//
-//                                if (!links.contains(linkKey)) {
-//                                    val options = PolylineAnnotationOptions()
-//                                        .withPoints(points)
-//                                        .withLineWidth(10.0)
-//                                        .withLineColor(Color.GREEN)
-//
-//                                    links[linkKey] = LinkData(polylineAnnotationMgr.create(options))
-//                                }
-//
-//                                break
-//                            }
-//
-//                            val temp = prevId
-//                            prevId = curId
-//                            curId = cur.adjacentNodes.find { temp != it }!!// .next
-//                        }
-//                    }
-//                }
             }
         }
     }
 
-    private fun onReceivedTiles(elements: JSONArray, queriedTiles: List<MapTiling.MapTile>) {
+    private fun onReceivedTiles(elements: JSONArray, ratings: List<StreetRating>, queriedTiles: List<MapTiling.MapTile>) {
         val nodePositions = HashMap<Long, Point>()
 
         for (mapTile in queriedTiles) {
+            // TODO: This assert sometimes fails
+//            assert(tiles[mapTile] == null)
+            removeTile(mapTile)
             tiles[mapTile] = TileData()
         }
 
@@ -424,14 +520,7 @@ class MapGraph(
                 val mapTile = pointToMapTile(wayCenter)
                 tiles[mapTile]?.ways?.add(wayId)
 
-                var way = ways[wayId]
-                if (way != null) {
-                    // Way was already loaded by another tile.
-                    way.referenceCount++
-                    continue
-                }
-
-                way = WayData(ArrayList(), 1)
+                val way = WayData(ArrayList())
                 ways[wayId] = way
 
                 val wayNodes = element.getJSONArray("nodes")
@@ -463,31 +552,14 @@ class MapGraph(
             catch (_: Exception) { }
         }
 
-        // Debug intersections
-//        circleAnnotationMgr.deleteAll()
-//        for ((nodeId, nodeData) in nodes) {
-//            if (nodeData.adjacentNodes.size == 2)
-//                continue
-//
-//            val options = CircleAnnotationOptions()
-//                .withPoint(nodeData.position)
-//                .withCircleRadius(10.0)
-//                .withCircleColor(Color.BLUE)
-//
-//            circleAnnotationMgr.create(options)
-//
-////            // Node is an intersection.
-////            for (adjacentNodeId in nodeData.adjacentNodes) {
-////                val nextIntersectionId = getNextIntersection(nodeId, adjacentNodeId)
-////                if (nextIntersectionId == null)
-////                    continue
-////
-////            }
-//        }
+        for (rating in ratings) {
+            val ratedLinkKey = LinkKey.of(rating.start, rating.end)
+            val mapTile = getLinkTile(ratedLinkKey) ?: continue
+            val tile = tiles[mapTile] ?: continue
+            tile.ratings[ratedLinkKey] = rating.rating
+        }
 
         for (mapTile in queriedTiles)
             drawStreets(mapTile)
-
-        loadPendingTiles()
     }
 }
