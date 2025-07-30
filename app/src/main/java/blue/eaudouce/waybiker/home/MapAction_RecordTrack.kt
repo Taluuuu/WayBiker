@@ -1,8 +1,8 @@
 package blue.eaudouce.waybiker.home
 
 import android.content.Context
-import android.graphics.Color
 import android.widget.FrameLayout
+import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.WaybikerMap
 import com.mapbox.geojson.Point
@@ -31,17 +31,8 @@ class MapAction_RecordTrack(
 
     private val recordedPathNodes = ArrayList<Long>()
     private val recordedPathPoints = ArrayList<Point>()
-    private val recordedPathAnnotation: PolylineAnnotation
+    private var recordedPathAnnotation: PolylineAnnotation? = null
     private val lineAnnotationMgr: PolylineAnnotationManager = waybikerMap.mapView.annotations.createPolylineAnnotationManager()
-
-    init {
-        val options = PolylineAnnotationOptions()
-            .withPoints(recordedPathPoints)
-            .withLineWidth(15.0)
-            .withLineColor(Color.CYAN)
-
-        recordedPathAnnotation = lineAnnotationMgr.create(options)
-    }
 
     private fun setState(newState: RecordState) {
         if (currentState == newState)
@@ -50,9 +41,7 @@ class MapAction_RecordTrack(
         // Exit previous state logic
         when (currentState) {
             RecordState.Inactive -> {
-                lineAnnotationMgr.delete(recordedPathAnnotation)
-                recordedPathNodes.clear()
-                recordedPathPoints.clear()
+
             }
             RecordState.Intro -> {
 
@@ -71,7 +60,7 @@ class MapAction_RecordTrack(
         // Enter new state logic
         when (currentState) {
             RecordState.Inactive -> {
-
+                deletePath()
             }
             RecordState.Intro -> {
                 dialogView?.updateDialog(
@@ -80,6 +69,8 @@ class MapAction_RecordTrack(
                     { finishAction() },
                     { setState(RecordState.Recording) }
                 )
+
+                deletePath()
             }
             RecordState.Recording -> {
                 dialogView?.updateDialog(
@@ -88,6 +79,8 @@ class MapAction_RecordTrack(
                     { setState(RecordState.Intro) },
                     { setState(RecordState.PostRecording) }
                 )
+
+                initPath()
 
                 waybikerMap.onLocationUpdated = { onLocationUpdated(it) }
             }
@@ -118,27 +111,47 @@ class MapAction_RecordTrack(
     }
 
     private fun onLocationUpdated(location: Point) {
-//        var nearestPointId = -1L
-//        var minDistance = Double.MAX_VALUE
-//        for (link in waybikerMap.graphLinks) {
-//            for (pointId in link.nodeIds) {
-//                val point = waybikerMap.getNodePosition(pointId)
-//                val dist = waybikerMap.calcPointDistanceSqr(location, point)
-//                if (dist < minDistance) {
-//                    minDistance = dist
-//                    nearestPointId = pointId
-//                }
-//            }
-//        }
-//
-//        if (recordedPathNodes.isNotEmpty() && recordedPathNodes.last() == nearestPointId) {
-//            return
-//        }
-//
-//        // We have reached a new point.
-//        recordedPathNodes.add(nearestPointId)
-//        recordedPathPoints.add(waybikerMap.getNodePosition(nearestPointId))
-//
-//        lineAnnotationMgr.update(recordedPathAnnotation)
+        val newNodeId = waybikerMap.mapGraph.findNearestNodeIdToPoint(location) ?: return
+
+        val addPoint = { nodeId: Long ->
+            val nodePos = waybikerMap.mapGraph.getNodePosition(nodeId)
+            if (nodePos != null) {
+                recordedPathNodes.add(nodeId)
+                recordedPathPoints.add(nodePos)
+            }
+        }
+
+        if (recordedPathNodes.isEmpty()) {
+            addPoint(newNodeId)
+            return
+        }
+
+        val lastNodeId = recordedPathNodes.last()
+        if (newNodeId == lastNodeId)
+            return // We did not move
+
+        val pathToNewNode = waybikerMap.mapGraph.findShortestPathBFS(lastNodeId, newNodeId) ?: return
+        for (i in 1 until pathToNewNode.size)
+            addPoint(pathToNewNode[i])
+
+        lineAnnotationMgr.update(recordedPathAnnotation!!)
+    }
+
+    private fun deletePath() {
+        recordedPathNodes.clear()
+        recordedPathPoints.clear()
+
+        recordedPathAnnotation?.let { lineAnnotationMgr.delete(it) }
+    }
+
+    private fun initPath() {
+
+        val options = PolylineAnnotationOptions()
+            .withPoints(recordedPathPoints)
+            .withLineWidth(20.0)
+            .withLineColor("#3467ec".toColorInt())
+            .withLineOpacity(1.0)
+
+        recordedPathAnnotation = lineAnnotationMgr.create(options)
     }
 }

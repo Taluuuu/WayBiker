@@ -136,9 +136,13 @@ class MapGraph(mapView: MapView) {
         return sqrt(x * x + y * y) * R
     }
 
-    fun findNearestNodeIdToPoint(point: Point, nodeIds: List<Long>): Long {
+    fun findNearestNodeIdToPoint(point: Point): Long? {
+        return findNearestNodeIdToPoint(point, nodes.keys.toList())
+    }
+
+    fun findNearestNodeIdToPoint(point: Point, nodeIds: List<Long>): Long? {
         var minDistance = Double.MAX_VALUE
-        var nearestNodeId = 0L
+        var nearestNodeId = -1L
         for (nodeId in nodeIds) {
             val nodePoint = getNodePosition(nodeId) ?: continue
             val distance = calcPointDistanceSqr(point, nodePoint)
@@ -148,7 +152,7 @@ class MapGraph(mapView: MapView) {
             }
         }
 
-        return nearestNodeId
+        return if (nearestNodeId == -1L) null else nearestNodeId
     }
 
     private fun removeTile(tile: MapTiling.MapTile) {
@@ -312,17 +316,48 @@ class MapGraph(mapView: MapView) {
         })
     }
 
-    private fun getNextIntersection(startId: Long, adjId: Long): Long? {
-        var adjId = adjId
-        var startId = startId
-        var node = nodes[adjId] ?: return null
-        while (node.adjacentNodes.size == 2) {
-            startId = adjId
-            adjId = node.adjacentNodes.find { it != startId } ?: return null
-            node = nodes[adjId] ?: return null
+//    private fun getNextIntersection(startId: Long, adjId: Long): Long? {
+//        var adjId = adjId
+//        var startId = startId
+//        var node = nodes[adjId] ?: return null
+//        while (node.adjacentNodes.size == 2) {
+//            startId = adjId
+//            adjId = node.adjacentNodes.find { it != startId } ?: return null
+//            node = nodes[adjId] ?: return null
+//        }
+//
+//        return adjId
+//    }
+
+    // Does not take into account the distance between nodes.
+    fun findShortestPathBFS(
+        startId: Long,
+        endId: Long,
+    ): List<Long>? {
+        val queue = ArrayDeque<List<Long>>() // Queue of paths
+        val visited = HashSet<Long>()
+
+        queue.add(listOf(startId))
+        visited.add(startId)
+
+        while (queue.isNotEmpty()) {
+            val path = queue.removeFirst()
+            val currentId = path.last()
+
+            if (currentId == endId)
+                return path // Success
+
+            val currentNode = nodes[currentId] ?: continue
+
+            for (neighbor in currentNode.adjacentNodes) {
+                if (!visited.contains(neighbor)) {
+                    visited.add(neighbor)
+                    queue.add(path + neighbor)
+                }
+            }
         }
 
-        return adjId
+        return null // No path found
     }
 
     fun areNeighbourTilesLoaded(centerTile: MapTiling.MapTile): Boolean {
@@ -435,7 +470,7 @@ class MapGraph(mapView: MapView) {
 
                                     val options = PolylineAnnotationOptions()
                                         .withPoints(points)
-                                        .withLineWidth(10.0)
+                                        .withLineWidth(15.0)
                                         .withLineColor(calcStreetColor(rating))
                                         .withLineOpacity(0.5)
                                         .withData(jsonElement)

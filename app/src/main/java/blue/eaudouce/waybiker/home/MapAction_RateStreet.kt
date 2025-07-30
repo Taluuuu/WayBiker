@@ -235,7 +235,7 @@ class MapAction_RateStreet(
         // Find the new intersection for this handle
         val usableIntersections = ArrayList(waybikerMap.mapGraph.getLinkedIntersectionIds(currentIntersection))
         usableIntersections.add(currentIntersection)
-        val nearestNodeId = waybikerMap.mapGraph.findNearestNodeIdToPoint(circleAnnotation.point, usableIntersections)
+        val nearestNodeId = waybikerMap.mapGraph.findNearestNodeIdToPoint(circleAnnotation.point, usableIntersections) ?: return
 
         // Move the handle to this intersection
         circleAnnotation.point = waybikerMap.mapGraph.getNodePosition(nearestNodeId) ?: return
