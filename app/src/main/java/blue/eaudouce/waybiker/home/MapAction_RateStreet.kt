@@ -11,6 +11,7 @@ import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.MapGraph
 import blue.eaudouce.waybiker.map.StreetBit
 import blue.eaudouce.waybiker.map.WaybikerMap
+import blue.eaudouce.waybiker.util.MapTiling
 import com.google.gson.JsonObject
 import com.mapbox.maps.plugin.annotation.Annotation
 import com.mapbox.maps.plugin.annotation.annotations
@@ -31,6 +32,8 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import okhttp3.Dispatcher
 import kotlin.math.roundToInt
 import kotlin.uuid.ExperimentalUuidApi
@@ -130,6 +133,7 @@ class MapAction_RateStreet(
                     "",
                     { setState(RatingState.DefineStreetLength) },
                     {
+                        val editedTiles = ArrayList<MapTiling.MapTile>()
                         lifecycleScope.launch {
                             withContext(Dispatchers.IO) {
                                 try {
@@ -148,20 +152,24 @@ class MapAction_RateStreet(
                                                     user_id = SupabaseInstance.client.auth.currentUserOrNull()?.id ?: "",
                                                     tile_x = linkTile.x,
                                                     tile_y = linkTile.y,
+                                                    Clock.System.now()
                                                 )
 
                                                 ratingsTable.upsert(rating)
+
+                                                if (!editedTiles.contains(linkTile))
+                                                    editedTiles.add(linkTile)
                                             }
                                         }
                                 } catch (e: Exception) {
                                     // TODO: Show error
+                                    e.printStackTrace()
                                 }
                             }
 
-                            waybikerMap.refreshMap()
+                            waybikerMap.mapGraph.queueTileLoads(editedTiles, true)
                             finishAction()
                         }
-
                     }
                 )
 

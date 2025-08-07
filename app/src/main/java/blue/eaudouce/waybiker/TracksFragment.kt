@@ -9,11 +9,13 @@ import android.widget.LinearLayout
 import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.home.TrackView
+import blue.eaudouce.waybiker.util.MAX_STREET_RATING
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.min
 
 class TracksFragment : Fragment(R.layout.fragment_tracks) {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,18 +38,77 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
                 }
             }
 
-            if (tracks != null) {
-                context?.let { ctx ->
-                    val trackListView = view?.findViewById<LinearLayout>(R.id.ll_track_list)
-                    if (trackListView != null) {
-                        for (track in tracks) {
-                            val trackView = TrackView(ctx)
-                            trackView.applyTrack(track)
-                            trackListView.addView(trackView)
-                        }
-                    }
+            if (tracks == null)
+                return@launch
+
+            val trackListView = view?.findViewById<LinearLayout>(R.id.ll_track_list)
+            if (trackListView == null)
+                return@launch
+
+            context?.let { ctx ->
+                for (track in tracks) {
+                    val trackPoints = fetchTrackPoints(track.track_id)
+                    if (trackPoints == null)
+                        continue
+
+                    val trackScore = calcTrackScore(trackPoints)
+
+                    val trackView = TrackView(ctx)
+                    trackView.applyTrack(track)
+                    trackListView.addView(trackView)
                 }
             }
         }
+    }
+
+    private suspend fun fetchTrackPoints(trackId : String): List<TrackPoint>? {
+        return withContext(Dispatchers.IO) {
+            try {
+                SupabaseInstance.client
+                    .from("track_points")
+                    .select {
+                        filter {
+                            eq("track_id", trackId)
+                        }
+                    }.decodeList<TrackPoint>()
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+
+    // The track score is that of its lowest segment.
+    private suspend fun calcTrackScore(trackPoints: List<TrackPoint>): Float? {
+        // TODO: Remove this magic number
+        var minSegmentScore = MAX_STREET_RATING
+        var hasAnyScoredSegment = false
+
+        withContext(Dispatchers.IO) {
+            trackPoints.zipWithNext().forEach { (start, end) ->
+                val ratings = try {
+                    SupabaseInstance.client
+                        .from("street_ratings")
+                        .select {
+                            filter {
+                                and {
+                                    eq("start", start)
+                                    eq("end", end)
+                                }
+                            }
+                        }.decodeList<StreetRating>()
+                } catch (e: Exception) {
+                    listOf()
+                }
+
+//                val score = calcSegmentScore(ratings)
+//                if (score != null) {
+//                    minSegmentScore = min(minSegmentScore, score)
+//                    hasAnyScoredSegment = true
+//                }
+            }
+        }
+
+//        return if (hasAnyScoredSegment) minSegmentScore else null
+        return null
     }
 }

@@ -7,6 +7,9 @@ import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.pointToMapTile
 import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
+import blue.eaudouce.waybiker.util.calcSegmentScore
+import blue.eaudouce.waybiker.util.calcStreetColor
+import blue.eaudouce.waybiker.util.isRatingFading
 import com.google.gson.JsonObject
 import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
@@ -46,6 +49,11 @@ class MapGraph(mapView: MapView) {
         }
     }
 
+    private data class RatingData(
+        val rating: Float,
+        val fading: Boolean
+    )
+
     private class TileData {
         // All IDs of ways owned by this tile
         val ways = ArrayList<Long>()
@@ -53,7 +61,7 @@ class MapGraph(mapView: MapView) {
         // Stored to make sure links are deleted once the tile is deleted.
         val links = ArrayList<LinkKey>()
 
-        val ratings = HashMap<LinkKey, Short>()
+        val ratings = HashMap<LinkKey, RatingData>()
     }
 
     private data class WayData(
@@ -82,7 +90,6 @@ class MapGraph(mapView: MapView) {
     private data class LinkData(
         val annotation: PolylineAnnotation,
         val nodeIds: List<Long>,
-        var rating: Short
     )
 
     private val links = HashMap<LinkKey, LinkData>()
@@ -164,9 +171,11 @@ class MapGraph(mapView: MapView) {
         for (wayId in tileData.ways)
             removeWay(wayId)
 
-        // TODO
-//        for (linkId in tileData.links)
-//            removeLink(linkId)
+        for (linkKey in tileData.links) {
+            links.remove(linkKey)?.let {
+                linkAnnotationMgr.delete(it.annotation)
+            }
+        }
     }
 
     private fun removeWay(wayId: Long) {
@@ -216,9 +225,9 @@ class MapGraph(mapView: MapView) {
         }
     }
 
-    fun queueTileLoads(newTiles: List<MapTiling.MapTile>) {
+    fun queueTileLoads(newTiles: List<MapTiling.MapTile>, forceReload: Boolean = false) {
         for (tile in newTiles) {
-            if (!tilesToLoad.contains(tile) && !tilesCurrentlyLoading.contains(tile) && !tiles.contains(tile))
+            if (forceReload || !tilesToLoad.contains(tile) && !tilesCurrentlyLoading.contains(tile) && !tiles.contains(tile))
                 tilesToLoad.add(tile)
         }
 
@@ -376,44 +385,6 @@ class MapGraph(mapView: MapView) {
         return true
     }
 
-    private fun calcStreetColor(rating: Short?): String {
-        if (rating == null)
-            return "#9c9c9c"
-
-        val streetColorValues = arrayListOf(
-            Pair(0.0f, Color.RED),
-            Pair(0.5f, Color.YELLOW),
-            Pair(1.0f, Color.GREEN)
-        )
-
-        val alpha = rating / 5.0f // TODO: Magic number bad
-        val colorRange = streetColorValues
-            .zipWithNext()
-            .find { (minColor, maxColor) ->
-                alpha >= minColor.first && alpha <= maxColor.first
-            } ?: return "#9c9c9c"
-
-        val (range0, range1) = colorRange
-        val (a0, c0) = range0
-        val (a1, c1) = range1
-
-        val withinRangeAlpha = (alpha - a0) / (a1 - a0)
-
-        val r0 = Color.red(c0)
-        val g0 = Color.green(c0)
-        val b0 = Color.blue(c0)
-
-        val r1 = Color.red(c1)
-        val g1 = Color.green(c1)
-        val b1 = Color.blue(c1)
-
-        val finalRed = (r0 + (r1 - r0) * withinRangeAlpha) / 255.0f
-        val finalGreen = (g0 + (g1 - g0) * withinRangeAlpha) / 255.0f
-        val finalBlue = (b0 + (b1 - b0) * withinRangeAlpha) / 255.0f
-
-        return String.format("#%06X", 0xFFFFFF and Color.rgb(finalRed, finalGreen, finalBlue))
-    }
-
     fun drawStreets(centerTile: MapTiling.MapTile) {
         for (i in centerTile.x - 1..centerTile.x + 1) {
             for (j in centerTile.y - 1..centerTile.y + 1) {
@@ -475,11 +446,12 @@ class MapGraph(mapView: MapView) {
                                     val options = PolylineAnnotationOptions()
                                         .withPoints(points)
                                         .withLineWidth(15.0)
-                                        .withLineColor(calcStreetColor(rating))
+                                        .withLineColor(calcStreetColor(rating?.rating))
                                         .withLineOpacity(0.5)
+                                        .withLineBlur(if (rating?.fading?: false) 10.0 else 0.0)
                                         .withData(jsonElement)
 
-                                    links[linkKey] = LinkData(linkAnnotationMgr.create(options), linkNodeIds, 0)
+                                    links[linkKey] = LinkData(linkAnnotationMgr.create(options), linkNodeIds)
                                     tile.links.add(linkKey)
                                 }
 
@@ -599,11 +571,19 @@ class MapGraph(mapView: MapView) {
             catch (_: Exception) { }
         }
 
+        val segmentToRatings = HashMap<LinkKey, ArrayList<StreetRating>>()
         for (rating in ratings) {
             val ratedLinkKey = LinkKey.of(rating.start, rating.end)
-            val mapTile = getLinkTile(ratedLinkKey) ?: continue
+            segmentToRatings.getOrPut(ratedLinkKey) { arrayListOf() }.add(rating)
+        }
+
+        for ((linkKey, segmentRatings) in segmentToRatings) {
+            val mapTile = getLinkTile(linkKey) ?: continue
             val tile = tiles[mapTile] ?: continue
-            tile.ratings[ratedLinkKey] = rating.rating
+            val rating = calcSegmentScore(segmentRatings)
+            val isFading = isRatingFading(segmentRatings)
+            if (rating != null)
+                tile.ratings[linkKey] = RatingData(rating, isFading)
         }
 
         for (mapTile in queriedTiles)

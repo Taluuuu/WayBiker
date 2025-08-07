@@ -1,5 +1,6 @@
 package blue.eaudouce.waybiker
 
+import kotlinx.datetime.Instant
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -9,7 +10,8 @@ data class StreetRating(
     val rating: Short,
     val user_id: String,
     val tile_x: Int,
-    val tile_y: Int
+    val tile_y: Int,
+    val timestamp: Instant?
 )
 
 @Serializable
