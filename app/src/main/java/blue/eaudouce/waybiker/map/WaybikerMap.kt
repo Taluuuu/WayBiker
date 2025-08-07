@@ -147,7 +147,7 @@ class WaybikerMap(
 //                val polygonOptions = PolygonAnnotationOptions()
 //                    .withPoints(listOf(points))
 //                    .withFillColor(if (mapGraph.areNeighbourTilesLoaded(tile)) Color.GREEN else Color.RED)
-//                    .withFillOpacity(0.2)
+//                    .withFillOpacity(0.1)
 //                testAnnotationMgr.create(polygonOptions)
 //
 //                val polylineOptions = PolylineAnnotationOptions()

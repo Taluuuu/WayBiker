@@ -91,6 +91,7 @@ class MapGraph(mapView: MapView) {
     private val tilesCurrentlyLoading = ArrayList<MapTiling.MapTile>()
     private val linkAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
     private val circleAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
+    private val wayAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
     var onClickedLink: ((LinkKey) -> Unit)? = null
 
@@ -234,7 +235,7 @@ class MapGraph(mapView: MapView) {
         }
 
         return String.format("""
-            [out:json][timeout:25];
+            [out:json];
             (
 %s
             );
@@ -260,7 +261,7 @@ class MapGraph(mapView: MapView) {
             .toRequestBody("application/x-www-form-urlencoded".toMediaTypeOrNull())
 
         val request = Request.Builder()
-            .url("https://overpass-api.de/api/interpreter")
+            .url("https://overpass.private.coffee/api/interpreter")
             .post(requestBody)
             .build()
 
@@ -270,8 +271,11 @@ class MapGraph(mapView: MapView) {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 lifecycleScope.launch {
-                    tilesCurrentlyLoading.clear()
                     e.printStackTrace()
+
+                    tilesToLoad += tilesCurrentlyLoading;
+                    tilesCurrentlyLoading.clear()
+                    loadPendingTiles()
                 }
             }
 
@@ -418,7 +422,7 @@ class MapGraph(mapView: MapView) {
                     continue
 
                 val tile = tiles[mapTile]
-                if (tile == null || tile.links.isNotEmpty())
+                if (tile == null)
                     continue
 
                 // Get all nodes in the tile that are intersections
@@ -582,6 +586,15 @@ class MapGraph(mapView: MapView) {
                     if (nodeIndex < wayNodes.length() - 1)
                         node.adjacentNodes.add(wayNodes.getLong(nodeIndex + 1))
                 }
+
+//                val wayPositions = way.nodes.mapNotNull { nodePositions[it] }
+//                val options = PolylineAnnotationOptions()
+//                    .withPoints(wayPositions)
+//                    .withLineWidth(5.0)
+//                    .withLineColor(Color.BLUE)
+//                    .withLineOpacity(0.3)
+//
+//                wayAnnotationMgr.create(options)
             }
             catch (_: Exception) { }
         }
