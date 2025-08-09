@@ -6,10 +6,12 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.home.TrackView
 import blue.eaudouce.waybiker.util.MAX_STREET_RATING
+import blue.eaudouce.waybiker.util.calcSegmentScore
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.Dispatchers
@@ -54,11 +56,22 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
                     val trackScore = calcTrackScore(trackPoints)
 
                     val trackView = TrackView(ctx)
-                    trackView.applyTrack(track)
+                    trackView.applyTrack(track, trackScore,
+                        {
+                            view?.findViewById<ConstraintLayout>(R.id.cl_track_list)?.visibility = View.INVISIBLE
+
+
+                        },
+                        {
+
+                        }
+                    )
                     trackListView.addView(trackView)
                 }
             }
+
         }
+
     }
 
     private suspend fun fetchTrackPoints(trackId : String): List<TrackPoint>? {
@@ -79,8 +92,7 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
 
     // The track score is that of its lowest segment.
     private suspend fun calcTrackScore(trackPoints: List<TrackPoint>): Float? {
-        // TODO: Remove this magic number
-        var minSegmentScore = MAX_STREET_RATING
+        var minSegmentScore = MAX_STREET_RATING.toFloat()
         var hasAnyScoredSegment = false
 
         withContext(Dispatchers.IO) {
@@ -91,24 +103,24 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
                         .select {
                             filter {
                                 and {
-                                    eq("start", start)
-                                    eq("end", end)
+                                    eq("start", start.point)
+                                    eq("end", end.point)
                                 }
                             }
                         }.decodeList<StreetRating>()
                 } catch (e: Exception) {
+                    e.printStackTrace()
                     listOf()
                 }
 
-//                val score = calcSegmentScore(ratings)
-//                if (score != null) {
-//                    minSegmentScore = min(minSegmentScore, score)
-//                    hasAnyScoredSegment = true
-//                }
+                val score = calcSegmentScore(ratings)
+                if (score != null) {
+                    minSegmentScore = min(minSegmentScore, score)
+                    hasAnyScoredSegment = true
+                }
             }
         }
 
-//        return if (hasAnyScoredSegment) minSegmentScore else null
-        return null
+        return if (hasAnyScoredSegment) minSegmentScore else null
     }
 }

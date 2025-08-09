@@ -46,8 +46,7 @@
             <FrameLayout
                 android:id="@+id/fl_dialog_content"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent">
-            </FrameLayout>
+                android:layout_height="match_parent"/>
 
             <Space
                 android:layout_width="match_parent"

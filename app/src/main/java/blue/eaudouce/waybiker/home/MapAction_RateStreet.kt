@@ -9,7 +9,6 @@ import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.StreetRating
 import blue.eaudouce.waybiker.SupabaseInstance
 import blue.eaudouce.waybiker.map.MapGraph
-import blue.eaudouce.waybiker.map.StreetBit
 import blue.eaudouce.waybiker.map.WaybikerMap
 import blue.eaudouce.waybiker.util.MapTiling
 import com.google.gson.JsonObject

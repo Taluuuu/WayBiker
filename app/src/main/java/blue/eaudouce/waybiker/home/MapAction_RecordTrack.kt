@@ -1,6 +1,8 @@
 package blue.eaudouce.waybiker.home
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.core.graphics.toColorInt
 import blue.eaudouce.waybiker.SupabaseInstance
@@ -44,6 +46,7 @@ class MapAction_RecordTrack(
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
 
+    @SuppressLint("SetTextI18n")
     private fun setState(newState: RecordState) {
         if (currentState == newState)
             return
@@ -94,6 +97,9 @@ class MapAction_RecordTrack(
                 waybikerMap.onLocationUpdated = { onLocationUpdated(it) }
             }
             RecordState.PostRecording -> {
+                val trackNameEdit = EditText(tabContentView.context)
+                trackNameEdit.setText("Track Name")
+
                 dialogView?.updateDialog(
                     "Save this track?",
                     "You will be notified if there is a change in the condition of this track.",
@@ -131,7 +137,7 @@ class MapAction_RecordTrack(
 
                             val track = Track(
                                 trackId.toString(),
-                                "test",
+                                trackNameEdit.text.toString(),
                                 SupabaseInstance.client.auth.currentUserOrNull()?.id ?: ""
                             )
 
@@ -151,6 +157,8 @@ class MapAction_RecordTrack(
                         }
                     }
                 )
+
+                dialogView?.setContent(trackNameEdit)
             }
         }
     }
