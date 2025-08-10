@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -38,6 +39,8 @@ import java.net.URLEncoder
 import kotlin.invoke
 import kotlin.math.cos
 import kotlin.math.sqrt
+
+const val MAX_TILES_PER_QUERY = 8
 
 class MapGraph(mapView: MapView) {
     @ConsistentCopyVisibility
@@ -255,6 +258,9 @@ class MapGraph(mapView: MapView) {
 
     fun queueTileLoads(newTiles: List<MapTiling.MapTile>, forceReload: Boolean = false) {
         for (tile in newTiles) {
+            if (tilesToLoad.size >= MAX_TILES_PER_QUERY)
+                break
+
             if (forceReload || !tilesToLoad.contains(tile) && !tilesCurrentlyLoading.contains(tile) && !tiles.contains(tile))
                 tilesToLoad.add(tile)
         }
@@ -285,7 +291,7 @@ class MapGraph(mapView: MapView) {
     @SuppressLint("DefaultLocale")
     fun loadPendingTiles() {
 
-        if (tilesToLoad.isEmpty())
+        if (tilesToLoad.isEmpty() || tilesCurrentlyLoading.isNotEmpty())
             return
 
         for (tile in tilesToLoad)
@@ -511,7 +517,7 @@ class MapGraph(mapView: MapView) {
         return nodes[nodeId]?.isIntersection ?: false
     }
 
-    private fun onReceivedTiles(elements: JSONArray, ratings: List<StreetRating>, queriedTiles: MutableList<MapTiling.MapTile>) {
+    private suspend fun onReceivedTiles(elements: JSONArray, ratings: List<StreetRating>, queriedTiles: MutableList<MapTiling.MapTile>) {
         val nodePositions = HashMap<Long, Point>()
 
         queriedTiles.removeAll { tiles[it] != null }
@@ -625,7 +631,9 @@ class MapGraph(mapView: MapView) {
                 tile.ratings[linkKey] = RatingData(rating, isFading)
         }
 
-        for (mapTile in queriedTiles)
+        for (mapTile in queriedTiles) {
+            yield()
             drawStreets(mapTile)
+        }
     }
 }

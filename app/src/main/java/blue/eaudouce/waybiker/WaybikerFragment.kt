@@ -23,6 +23,8 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import io.github.jan.supabase.auth.auth
 
 class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
+    var mainActivity: MainActivity? = null
+
     private var homeFragment: HomeFragment? = null
     private var tracksFragment: TracksFragment? = null
     private var profileFragment: ProfileFragment? = null
@@ -68,6 +70,7 @@ class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
         homeFragment = HomeFragment.newInstance(waybikerMap)
         tracksFragment = TracksFragment.newInstance(waybikerMap)
         profileFragment = ProfileFragment()
+        profileFragment?.mainActivity = mainActivity
 
         homeFragment?.let {
             parentFragmentManager.beginTransaction()

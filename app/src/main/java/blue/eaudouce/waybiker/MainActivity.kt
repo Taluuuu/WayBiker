@@ -1,5 +1,6 @@
 package blue.eaudouce.waybiker
 
+import android.content.SharedPreferences
 import android.os.Bundle
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.FragmentActivity
@@ -12,6 +13,8 @@ import io.github.jan.supabase.plugins.SupabasePlugin
 import kotlinx.coroutines.launch
 import androidx.core.content.edit
 import com.google.android.gms.location.FusedLocationProviderClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : FragmentActivity(R.layout.main_activity) {
     private var currentFragment: MainAppFragment? = null
@@ -23,22 +26,12 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
             return
         }
 
-        // Restore session
-        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-        val sharedPreferences = EncryptedSharedPreferences.create(
-            "preferences",
-            masterKeyAlias,
-            applicationContext,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-
-        val refreshToken = sharedPreferences.getString("refreshToken", "")
-
         lifecycleScope.launch {
             try {
-                if (refreshToken?.isNotEmpty() ?: false) {
+                val refreshToken = getRefreshToken()
+                if (!refreshToken.isNullOrEmpty()) {
                     SupabaseInstance.client.auth.refreshSession(refreshToken)
+                    saveRefreshToken()
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -48,29 +41,16 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
             if (session == null) {
                 setCurrentFragment(WelcomeFragment())
             } else {
-                sharedPreferences.edit { putString("refreshToken", session.refreshToken) }
-                setCurrentFragment(WaybikerFragment())
+                val waybikerFragment = WaybikerFragment()
+                waybikerFragment.mainActivity = this@MainActivity
+                setCurrentFragment(waybikerFragment)
             }
         }
     }
 
     override fun onPause() {
-        // Save session
-        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-        val sharedPreferences = EncryptedSharedPreferences.create(
-            "preferences",
-            masterKeyAlias,
-            applicationContext,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
-
-        val session = SupabaseInstance.client.auth.currentSessionOrNull()
-        if (session != null) {
-            sharedPreferences.edit { putString("refreshToken", session.refreshToken) }
-        }
-
         super.onPause()
+        saveRefreshToken()
     }
 
     private fun setCurrentFragment(fragment: MainAppFragment) {
@@ -84,6 +64,46 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
             supportFragmentManager.beginTransaction()
                 .replace(R.id.fl_main, it)
                 .commit()
+        }
+    }
+
+    fun signOut() {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                SupabaseInstance.client.auth.signOut()
+            }
+
+            clearRefreshToken()
+            setCurrentFragment(WelcomeFragment())
+        }
+    }
+
+    private fun getSharedPreferences(): SharedPreferences {
+        val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+        return EncryptedSharedPreferences.create(
+            "preferences",
+            masterKeyAlias,
+            applicationContext,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    private fun getRefreshToken(): String? {
+        return getSharedPreferences().getString("refreshToken", "")
+    }
+
+    private fun saveRefreshToken() {
+        val session = SupabaseInstance.client.auth.currentSessionOrNull()
+        if (session != null) {
+            getSharedPreferences().edit { putString("refreshToken", session.refreshToken) }
+        }
+    }
+
+    private fun clearRefreshToken() {
+        val session = SupabaseInstance.client.auth.currentSessionOrNull()
+        if (session != null) {
+            getSharedPreferences().edit { putString("refreshToken", "") }
         }
     }
 }
