@@ -5,11 +5,16 @@ import androidx.fragment.app.Fragment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.lifecycle.lifecycleScope
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.home.HomeFragment
 import blue.eaudouce.waybiker.home.TrackView
+import blue.eaudouce.waybiker.map.MapGraph
+import blue.eaudouce.waybiker.map.WaybikerMap
 import blue.eaudouce.waybiker.util.MAX_STREET_RATING
 import blue.eaudouce.waybiker.util.calcSegmentScore
 import io.github.jan.supabase.auth.auth
@@ -20,8 +25,31 @@ import kotlinx.coroutines.withContext
 import kotlin.math.min
 
 class TracksFragment : Fragment(R.layout.fragment_tracks) {
+    private lateinit var waybikerMap: WaybikerMap
+
+    companion object {
+        fun newInstance(waybikerMap: WaybikerMap) : TracksFragment {
+            val instance = TracksFragment()
+            instance.waybikerMap = waybikerMap
+            return instance
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        reloadTracks()
+    }
+
+    override fun onPause() {
+        super.onPause()
+
+        view?.findViewById<ConstraintLayout>(R.id.cl_track_list)?.visibility = View.VISIBLE
+        view?.findViewById<ConstraintLayout>(R.id.cl_viewing_track)?.visibility = View.INVISIBLE
+        waybikerMap.mapGraph.clearHighlightedSegments()
+    }
+
+    private fun reloadTracks() {
+        view?.findViewById<LinearLayout>(R.id.ll_track_list)?.removeAllViews()
 
         val user = SupabaseInstance.client.auth.currentUserOrNull() ?: return
 
@@ -59,19 +87,45 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
                     trackView.applyTrack(track, trackScore,
                         {
                             view?.findViewById<ConstraintLayout>(R.id.cl_track_list)?.visibility = View.INVISIBLE
+                            view?.findViewById<ConstraintLayout>(R.id.cl_viewing_track)?.visibility = View.VISIBLE
+                            view?.findViewById<TextView>(R.id.tv_viewing_track_name)?.text = track.name
+                            val segments = trackPoints.zipWithNext().map { MapGraph.LinkKey.of(it.first.point, it.second.point) }
+                            waybikerMap.mapGraph.highlightSegments(segments)
 
-
+                            view?.findViewById<Button>(R.id.btn_viewing_track_back)?.setOnClickListener {
+                                view?.findViewById<ConstraintLayout>(R.id.cl_track_list)?.visibility = View.VISIBLE
+                                view?.findViewById<ConstraintLayout>(R.id.cl_viewing_track)?.visibility = View.INVISIBLE
+                                waybikerMap.mapGraph.clearHighlightedSegments()
+                            }
                         },
                         {
-
+                            deleteTrack(track.track_id)
                         }
                     )
                     trackListView.addView(trackView)
                 }
             }
-
         }
+    }
 
+    private fun deleteTrack(trackId: String) {
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    SupabaseInstance.client
+                        .from("tracks")
+                        .delete {
+                            filter {
+                                eq("track_id", trackId)
+                            }
+                        }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+
+            reloadTracks()
+        }
     }
 
     private suspend fun fetchTrackPoints(trackId : String): List<TrackPoint>? {
@@ -97,14 +151,15 @@ class TracksFragment : Fragment(R.layout.fragment_tracks) {
 
         withContext(Dispatchers.IO) {
             trackPoints.zipWithNext().forEach { (start, end) ->
+                val linkKey = MapGraph.LinkKey.of(start.point, end.point)
                 val ratings = try {
                     SupabaseInstance.client
                         .from("street_ratings")
                         .select {
                             filter {
                                 and {
-                                    eq("start", start.point)
-                                    eq("end", end.point)
+                                    eq("start", linkKey.first)
+                                    eq("end", linkKey.second)
                                 }
                             }
                         }.decodeList<StreetRating>()

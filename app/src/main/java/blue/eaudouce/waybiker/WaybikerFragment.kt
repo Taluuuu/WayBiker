@@ -66,7 +66,7 @@ class WaybikerFragment : MainAppFragment(R.layout.fragment_waybiker) {
         }
 
         homeFragment = HomeFragment.newInstance(waybikerMap)
-        tracksFragment = TracksFragment()
+        tracksFragment = TracksFragment.newInstance(waybikerMap)
         profileFragment = ProfileFragment()
 
         homeFragment?.let {

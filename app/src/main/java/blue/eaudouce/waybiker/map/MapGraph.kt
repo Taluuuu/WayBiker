@@ -106,6 +106,12 @@ class MapGraph(mapView: MapView) {
 
     private val client = OkHttpClient.Builder().build()
 
+    private val normalStreetOpacity = 0.5
+    private val highlightedStreetOpacity = 1.0
+    private val notHighlightedStreetOpacity = 0.1
+
+    private var highlightedSegments = HashSet<LinkKey>()
+
     init {
         linkAnnotationMgr.addClickListener { annotation ->
             val data = annotation.getData() as JsonObject
@@ -113,6 +119,28 @@ class MapGraph(mapView: MapView) {
             val p1 = data.get("p1").asLong
             onClickedLink?.invoke(LinkKey.of(p0, p1))
             false
+        }
+    }
+
+    fun highlightSegments(segmentsToHighlight: List<LinkKey>) {
+        highlightedSegments = segmentsToHighlight.toHashSet()
+        for ((linkKey, linkData) in links) {
+            if (highlightedSegments.contains(linkKey)) {
+                // Highlight segment
+                linkData.annotation.lineOpacity = highlightedStreetOpacity
+            } else {
+                linkData.annotation.lineOpacity = notHighlightedStreetOpacity
+            }
+
+            linkAnnotationMgr.update(linkData.annotation)
+        }
+    }
+
+    fun clearHighlightedSegments() {
+        highlightedSegments.clear()
+        for ((_, linkData) in links) {
+            linkData.annotation.lineOpacity = normalStreetOpacity
+            linkAnnotationMgr.update(linkData.annotation)
         }
     }
 
@@ -329,18 +357,24 @@ class MapGraph(mapView: MapView) {
         })
     }
 
-//    private fun getNextIntersection(startId: Long, adjId: Long): Long? {
-//        var adjId = adjId
-//        var startId = startId
-//        var node = nodes[adjId] ?: return null
-//        while (node.adjacentNodes.size == 2) {
-//            startId = adjId
-//            adjId = node.adjacentNodes.find { it != startId } ?: return null
-//            node = nodes[adjId] ?: return null
-//        }
-//
-//        return adjId
-//    }
+    fun getNextIntersection(startId: Long, adjId: Long): Long? {
+        var prevId = startId
+        var currentId = adjId
+
+        var node = nodes[currentId] ?: return null
+        val visited = mutableSetOf<Long>() // Prevent infinite loops
+
+        while (!node.isIntersection) {
+            if (!visited.add(currentId)) return null // loop detected
+
+            val nextId = node.adjacentNodes.find { it != prevId } ?: return null
+            prevId = currentId
+            currentId = nextId
+            node = nodes[currentId] ?: return null
+        }
+
+        return currentId
+    }
 
     // Does not take into account the distance between nodes.
     fun findShortestPathBFS(
@@ -443,11 +477,16 @@ class MapGraph(mapView: MapView) {
                                     jsonElement.addProperty("p0", linkKey.first)
                                     jsonElement.addProperty("p1", linkKey.second)
 
+                                    var opacity = normalStreetOpacity
+                                    if (!highlightedSegments.isEmpty()) {
+                                        opacity = if (highlightedSegments.contains(linkKey)) highlightedStreetOpacity else notHighlightedStreetOpacity
+                                    }
+
                                     val options = PolylineAnnotationOptions()
                                         .withPoints(points)
                                         .withLineWidth(15.0)
                                         .withLineColor(calcStreetColor(rating?.rating))
-                                        .withLineOpacity(0.5)
+                                        .withLineOpacity(opacity)
                                         .withLineBlur(if (rating?.fading?: false) 10.0 else 0.0)
                                         .withData(jsonElement)
 
@@ -460,7 +499,7 @@ class MapGraph(mapView: MapView) {
 
                             val temp = prevId
                             prevId = curId
-                            curId = cur.adjacentNodes.find { temp != it }!!// .next
+                            curId = cur.adjacentNodes.find { temp != it }!!
                         }
                     }
                 }

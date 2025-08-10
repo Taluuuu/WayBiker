@@ -36,16 +36,19 @@ class MainActivity : FragmentActivity(R.layout.main_activity) {
         val refreshToken = sharedPreferences.getString("refreshToken", "")
 
         lifecycleScope.launch {
-            // TODO can still crash on stale token
             try {
                 if (refreshToken?.isNotEmpty() ?: false) {
                     SupabaseInstance.client.auth.refreshSession(refreshToken)
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
 
-            if (SupabaseInstance.client.auth.currentSessionOrNull() == null) {
+            val session = SupabaseInstance.client.auth.currentSessionOrNull()
+            if (session == null) {
                 setCurrentFragment(WelcomeFragment())
             } else {
+                sharedPreferences.edit { putString("refreshToken", session.refreshToken) }
                 setCurrentFragment(WaybikerFragment())
             }
         }

@@ -106,14 +106,22 @@ class MapAction_RecordTrack(
                     { finishAction() },
                     {
                         lifecycleScope.launch {
-                            // Trim all points that are not intersections, apart from the first and last ones.
+                            if (recordedPathNodes.size < 2) {
+                                finishAction()
+                                return@launch
+                            }
+
                             val finalPoints = ArrayList<TrackPoint>()
                             val trackId = UUID.randomUUID()
                             var pointIndex = 0
-                            for (i in 0 until recordedPathNodes.size) {
-                                val nodeId = recordedPathNodes[i]
 
-                                if (i == 0 || i == recordedPathNodes.size - 1) {
+                            if (!waybikerMap.mapGraph.isNodeIntersection(recordedPathNodes[0])) {
+                                val nodeId = waybikerMap.mapGraph.getNextIntersection(
+                                    recordedPathNodes[1],
+                                    recordedPathNodes[0]
+                                )
+
+                                if (nodeId != null) {
                                     finalPoints.add(
                                         TrackPoint(
                                             trackId.toString(),
@@ -121,8 +129,11 @@ class MapAction_RecordTrack(
                                             nodeId
                                         )
                                     )
-                                    continue
                                 }
+                            }
+
+                            for (i in 0 until recordedPathNodes.size) {
+                                val nodeId = recordedPathNodes[i]
 
                                 if (waybikerMap.mapGraph.isNodeIntersection(nodeId)) {
                                     finalPoints.add(
@@ -133,6 +144,28 @@ class MapAction_RecordTrack(
                                         )
                                     )
                                 }
+                            }
+
+                            if (!waybikerMap.mapGraph.isNodeIntersection(recordedPathNodes[recordedPathNodes.size - 1])) {
+                                val nodeId = waybikerMap.mapGraph.getNextIntersection(
+                                    recordedPathNodes[recordedPathNodes.size - 2],
+                                    recordedPathNodes[recordedPathNodes.size - 1]
+                                )
+
+                                if (nodeId != null) {
+                                    finalPoints.add(
+                                        TrackPoint(
+                                            trackId.toString(),
+                                            pointIndex++,
+                                            nodeId
+                                        )
+                                    )
+                                }
+                            }
+
+                            if (finalPoints.size < 2) {
+                                finishAction()
+                                return@launch
                             }
 
                             val track = Track(
