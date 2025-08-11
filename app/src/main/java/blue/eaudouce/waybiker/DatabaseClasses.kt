@@ -27,3 +27,14 @@ data class TrackPoint(
     val point_index: Int,
     val point: Long
 )
+
+@Serializable
+data class Utility(
+    val id: String,
+    val tile_x: Int,
+    val tile_y: Int,
+    val point_x: Double,
+    val point_y: Double,
+    val user_id: String,
+    val utility_type: Short // 0 for lock, 1 for repair
+)

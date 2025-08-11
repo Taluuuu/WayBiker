@@ -39,6 +39,12 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
             startAction()
         }
 
+        val markUtilityButton = view.findViewById<FloatingActionButton>(R.id.fab_mark_utility)
+        markUtilityButton.setOnClickListener {
+            mapAction = MapAction_MarkUtility(waybikerMap, view.findViewById(R.id.fl_home_dialog))
+            startAction()
+        }
+
         viewsHiddenDuringAction.add(view.findViewById(R.id.hsv_map_toggles))
         viewsHiddenDuringAction.add(view.findViewById(R.id.ll_action_buttons))
     }

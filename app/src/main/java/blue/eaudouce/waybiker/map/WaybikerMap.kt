@@ -26,6 +26,7 @@ import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolygonAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
+import com.mapbox.maps.plugin.gestures.addOnMapClickListener
 import com.mapbox.maps.toCameraOptions
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
@@ -49,7 +50,8 @@ class WaybikerMap(
     private val testBorderAnnotationMgr: PolylineAnnotationManager
 
     val mapGraph: MapGraph
-    var onLocationUpdated: ((Point) -> (Unit))? = null
+    var onLocationUpdated: ((Point) -> Unit)? = null
+    var onClickedMap: ((Point) -> Unit)? = null
     private var isFirstLocationUpdate = true
 
     init {
@@ -59,6 +61,11 @@ class WaybikerMap(
         testBorderAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
 
         mapView.mapboxMap.subscribeCameraChanged { refreshMap() }
+        mapView.mapboxMap.addOnMapClickListener { point ->
+            onClickedMap?.invoke(point)
+            true
+        }
+
         mapGraph = MapGraph(mapView)
     }
 

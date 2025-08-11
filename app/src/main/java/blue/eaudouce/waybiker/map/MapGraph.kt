@@ -2,8 +2,11 @@ package blue.eaudouce.waybiker.map
 
 import android.annotation.SuppressLint
 import android.graphics.Color
+import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.StreetRating
 import blue.eaudouce.waybiker.SupabaseInstance
+import blue.eaudouce.waybiker.Utility
+import blue.eaudouce.waybiker.util.BitmapUtils.bitmapFromDrawableRes
 import blue.eaudouce.waybiker.util.MapTiling
 import blue.eaudouce.waybiker.util.MapTiling.pointToMapTile
 import blue.eaudouce.waybiker.util.MapTiling.toCoordinateBounds
@@ -15,9 +18,12 @@ import com.mapbox.geojson.Point
 import com.mapbox.maps.MapView
 import com.mapbox.maps.plugin.annotation.annotations
 import com.mapbox.maps.plugin.annotation.generated.CircleAnnotationOptions
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotation
+import com.mapbox.maps.plugin.annotation.generated.PointAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotation
 import com.mapbox.maps.plugin.annotation.generated.PolylineAnnotationOptions
 import com.mapbox.maps.plugin.annotation.generated.createCircleAnnotationManager
+import com.mapbox.maps.plugin.annotation.generated.createPointAnnotationManager
 import com.mapbox.maps.plugin.annotation.generated.createPolylineAnnotationManager
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +48,9 @@ import kotlin.math.sqrt
 
 const val MAX_TILES_PER_QUERY = 8
 
-class MapGraph(mapView: MapView) {
+class MapGraph(
+    private val mapView: MapView
+) {
     @ConsistentCopyVisibility
     data class LinkKey private constructor(val first: Long, val second: Long) {
         companion object {
@@ -65,6 +73,9 @@ class MapGraph(mapView: MapView) {
         val links = ArrayList<LinkKey>()
 
         val ratings = HashMap<LinkKey, RatingData>()
+
+        val lockAnnotations = ArrayList<PointAnnotation>()
+        val repairAnnotations = ArrayList<PointAnnotation>()
     }
 
     private data class WayData(
@@ -102,6 +113,7 @@ class MapGraph(mapView: MapView) {
     private val linkAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
     private val circleAnnotationMgr = mapView.annotations.createCircleAnnotationManager()
     private val wayAnnotationMgr = mapView.annotations.createPolylineAnnotationManager()
+    private val utilitiesAnnotationMgr = mapView.annotations.createPointAnnotationManager()
 
     var onClickedLink: ((LinkKey) -> Unit)? = null
 
@@ -159,6 +171,12 @@ class MapGraph(mapView: MapView) {
             for (wayId in tileData.ways)
                 removeWay(wayId)
 
+            for (annotation in tileData.lockAnnotations)
+                utilitiesAnnotationMgr.delete(annotation)
+
+            for (annotation in tileData.repairAnnotations)
+                utilitiesAnnotationMgr.delete(annotation)
+
             return@removeIf true
         }
     }
@@ -207,6 +225,12 @@ class MapGraph(mapView: MapView) {
                 linkAnnotationMgr.delete(it.annotation)
             }
         }
+
+        for (annotation in tileData.lockAnnotations)
+            utilitiesAnnotationMgr.delete(annotation)
+
+        for (annotation in tileData.repairAnnotations)
+            utilitiesAnnotationMgr.delete(annotation)
     }
 
     private fun removeWay(wayId: Long) {
@@ -351,7 +375,25 @@ class MapGraph(mapView: MapView) {
                                 .decodeList<StreetRating>()
                         }
 
-                        onReceivedTiles(elements, ratings, queriedTiles)
+                        val utilities = withContext(Dispatchers.IO) {
+                            SupabaseInstance.client
+                                .from("utilities")
+                                .select {
+                                    filter {
+                                        or {
+                                            queriedTiles.forEach { (x, y) ->
+                                                and {
+                                                    eq("tile_x", x)
+                                                    eq("tile_y", y)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                .decodeList<Utility>()
+                        }
+
+                        onReceivedTiles(elements, ratings, utilities, queriedTiles)
                         tilesCurrentlyLoading.clear()
                     } catch (e: Exception) {
                         e.printStackTrace()
@@ -517,7 +559,12 @@ class MapGraph(mapView: MapView) {
         return nodes[nodeId]?.isIntersection ?: false
     }
 
-    private suspend fun onReceivedTiles(elements: JSONArray, ratings: List<StreetRating>, queriedTiles: MutableList<MapTiling.MapTile>) {
+    private suspend fun onReceivedTiles(
+        elements: JSONArray,
+        ratings: List<StreetRating>,
+        utilities: List<Utility>,
+        queriedTiles: MutableList<MapTiling.MapTile>
+    ) {
         val nodePositions = HashMap<Long, Point>()
 
         queriedTiles.removeAll { tiles[it] != null }
@@ -634,6 +681,28 @@ class MapGraph(mapView: MapView) {
         for (mapTile in queriedTiles) {
             yield()
             drawStreets(mapTile)
+        }
+
+        val lockBitmap = bitmapFromDrawableRes(mapView.context, R.drawable.baseline_lock_24)
+        val wrenchBitmap = bitmapFromDrawableRes(mapView.context, R.drawable.baseline_build_24)
+        if (lockBitmap != null && wrenchBitmap != null) {
+            for (utility in utilities) {
+                if (utility.utility_type.toInt() == 0) {
+                    val options = PointAnnotationOptions()
+                        .withPoint(Point.fromLngLat(utility.point_x, utility.point_y))
+                        .withIconImage(lockBitmap)
+                        .withIconSize(1.0)
+
+                    tiles[MapTiling.MapTile(utility.tile_x, utility.tile_y)]?.lockAnnotations?.add(utilitiesAnnotationMgr.create(options))
+                } else {
+                    val options = PointAnnotationOptions()
+                        .withPoint(Point.fromLngLat(utility.point_x, utility.point_y))
+                        .withIconImage(wrenchBitmap)
+                        .withIconSize(1.0)
+
+                    tiles[MapTiling.MapTile(utility.tile_x, utility.tile_y)]?.repairAnnotations?.add(utilitiesAnnotationMgr.create(options))
+                }
+            }
         }
     }
 }

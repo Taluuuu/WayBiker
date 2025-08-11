@@ -46,7 +46,6 @@ class MapAction_RecordTrack(
 
     private val lifecycleScope = CoroutineScope(Dispatchers.Main)
 
-    @SuppressLint("SetTextI18n")
     private fun setState(newState: RecordState) {
         if (currentState == newState)
             return
