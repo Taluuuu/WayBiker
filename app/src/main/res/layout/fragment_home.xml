@@ -39,25 +39,26 @@
                     android:id="@+id/chip_map_annotations"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
                     android:text="Map Annotations" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/chip_bike_locks"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
                     android:text="Bike Locks" />
 
                 <com.google.android.material.chip.Chip
                     android:id="@+id/chip_service_points"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:checkable="true"
+                    android:checked="true"
                     android:text="Service Points" />
 
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/chip_bike_stores"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="Bike Shops" />
             </com.google.android.material.chip.ChipGroup>
 
         </LinearLayout>

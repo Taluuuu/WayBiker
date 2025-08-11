@@ -5,8 +5,10 @@ import androidx.fragment.app.Fragment
 import android.view.View
 import android.view.View.INVISIBLE
 import android.view.View.VISIBLE
+import android.widget.CompoundButton
 import blue.eaudouce.waybiker.R
 import blue.eaudouce.waybiker.map.WaybikerMap
+import com.google.android.material.chip.Chip
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
@@ -43,6 +45,21 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         markUtilityButton.setOnClickListener {
             mapAction = MapAction_MarkUtility(waybikerMap, view.findViewById(R.id.fl_home_dialog))
             startAction()
+        }
+
+        val chipMapAnnotations = view.findViewById<Chip>(R.id.chip_map_annotations)
+        chipMapAnnotations.setOnCheckedChangeListener { _, isChecked ->
+            waybikerMap.mapGraph.setStreetAnnotationsVisible(isChecked)
+        }
+
+        val chipBikeLocks = view.findViewById<Chip>(R.id.chip_bike_locks)
+        chipBikeLocks.setOnCheckedChangeListener { _, isChecked ->
+            waybikerMap.mapGraph.setBikeLocksVisible(isChecked)
+        }
+
+        val chipServicePoints = view.findViewById<Chip>(R.id.chip_service_points)
+        chipServicePoints.setOnCheckedChangeListener { _, isChecked ->
+            waybikerMap.mapGraph.setServicePointsVisible(isChecked)
         }
 
         viewsHiddenDuringAction.add(view.findViewById(R.id.hsv_map_toggles))

@@ -125,6 +125,10 @@ class MapGraph(
     private val highlightedStreetOpacity = 1.0
     private val notHighlightedStreetOpacity = 0.1
 
+    private var showStreetAnnotations = true
+    private var showBikeLocks = true
+    private var showServicePoints = true
+
     private var highlightedSegments = HashSet<LinkKey>()
 
     init {
@@ -134,6 +138,32 @@ class MapGraph(
             val p1 = data.get("p1").asLong
             onClickedLink?.invoke(LinkKey.of(p0, p1))
             false
+        }
+    }
+
+    fun setStreetAnnotationsVisible(visible: Boolean) {
+        showStreetAnnotations = visible
+        linkAnnotationMgr.annotations.forEach { it.lineOpacity = if (showStreetAnnotations) normalStreetOpacity else 0.0 }
+        linkAnnotationMgr.update(linkAnnotationMgr.annotations)
+    }
+
+    fun setBikeLocksVisible(visible: Boolean) {
+        showBikeLocks = visible
+        for ((_, tileData) in tiles) {
+            tileData.lockAnnotations.forEach {
+                it.iconOpacity = if (visible) 1.0 else 0.0
+                utilitiesAnnotationMgr.update(it)
+            }
+        }
+    }
+
+    fun setServicePointsVisible(visible: Boolean) {
+        showServicePoints = visible
+        for ((_, tileData) in tiles) {
+            tileData.repairAnnotations.forEach {
+                it.iconOpacity = if (visible) 1.0 else 0.0
+                utilitiesAnnotationMgr.update(it)
+            }
         }
     }
 
@@ -525,7 +555,7 @@ class MapGraph(
                                     jsonElement.addProperty("p0", linkKey.first)
                                     jsonElement.addProperty("p1", linkKey.second)
 
-                                    var opacity = normalStreetOpacity
+                                    var opacity = if (showStreetAnnotations) normalStreetOpacity else 0.0
                                     if (!highlightedSegments.isEmpty()) {
                                         opacity = if (highlightedSegments.contains(linkKey)) highlightedStreetOpacity else notHighlightedStreetOpacity
                                     }
@@ -687,18 +717,20 @@ class MapGraph(
         val wrenchBitmap = bitmapFromDrawableRes(mapView.context, R.drawable.baseline_build_24)
         if (lockBitmap != null && wrenchBitmap != null) {
             for (utility in utilities) {
-                if (utility.utility_type.toInt() == 0) {
+                if (utility.utility_type.toInt() == 0) { // Bike locks
                     val options = PointAnnotationOptions()
                         .withPoint(Point.fromLngLat(utility.point_x, utility.point_y))
                         .withIconImage(lockBitmap)
                         .withIconSize(1.0)
+                        .withIconOpacity(if (showBikeLocks) 1.0 else 0.0)
 
                     tiles[MapTiling.MapTile(utility.tile_x, utility.tile_y)]?.lockAnnotations?.add(utilitiesAnnotationMgr.create(options))
-                } else {
+                } else { // Service points
                     val options = PointAnnotationOptions()
                         .withPoint(Point.fromLngLat(utility.point_x, utility.point_y))
                         .withIconImage(wrenchBitmap)
                         .withIconSize(1.0)
+                        .withIconOpacity(if (showServicePoints) 1.0 else 0.0)
 
                     tiles[MapTiling.MapTile(utility.tile_x, utility.tile_y)]?.repairAnnotations?.add(utilitiesAnnotationMgr.create(options))
                 }
