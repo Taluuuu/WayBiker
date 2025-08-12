@@ -112,6 +112,12 @@ class MapAction_MarkUtility(
                                 }
                             }
 
+                            selectedPoint?.let {
+                                waybikerMap.mapGraph.queueTileLoads(
+                                    listOf(MapTiling.pointToMapTile(it)),
+                                    true
+                                )
+                            }
                             finishAction()
                         }
                     }
