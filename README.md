@@ -12,6 +12,6 @@ Users can see a color-coded map of community ratings, where red is very dangerou
 
 Any user of the app can rate streets, which affects the map by giving more importance to newer ratings.
 
-![Screenshot](screenshot_select.png)
+![Screenshot](images/screenshot_select.png)
 
-![Screenshot](screenshot_rate.png)
+![Screenshot](images/screenshot_rate.png)
